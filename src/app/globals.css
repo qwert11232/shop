@@ -1,0 +1,209 @@
+@import "tailwindcss";
+
+/* ── ТЕХНОЛАБ · дизайн-токены (см. docs/DESIGN.md) ───────────────────────── */
+@theme {
+  --color-bg: #07090c;
+  --color-surface: #0e1218;
+  --color-surface2: #141a23;
+  --color-line: #1f2733;
+  --color-text: #f2f5f7;
+  --color-muted: #8a94a6;
+  --color-acid: #c6f32e;
+  --color-acid-dim: #9dc41f;
+  --color-violet: #7c5cff;
+  --color-danger: #ff5c6c;
+  --font-display: "Unbounded", "Manrope", system-ui, sans-serif;
+  --font-body: "Manrope", system-ui, -apple-system, sans-serif;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  min-height: 100dvh;
+  /* фоновая «лабораторная» сетка + свечение */
+  background-image:
+    radial-gradient(60rem 30rem at 80% -10%, rgba(124, 92, 255, 0.12), transparent 60%),
+    radial-gradient(50rem 26rem at -10% 0%, rgba(198, 243, 46, 0.07), transparent 60%),
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: auto, auto, 44px 44px, 44px 44px;
+}
+
+::selection {
+  background: var(--color-acid);
+  color: #0a0c08;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+/* ── компоненты ───────────────────────────────────────────────────────────── */
+.font-display {
+  font-family: var(--font-display);
+}
+
+.btn-acid {
+  background: var(--color-acid);
+  color: #0a0c08;
+  font-weight: 800;
+  border-radius: 14px;
+  padding: 0.85rem 1.25rem;
+  width: 100%;
+  transition: transform 0.12s ease, box-shadow 0.2s ease, background 0.2s ease;
+  box-shadow: 0 0 0 rgba(198, 243, 46, 0);
+}
+.btn-acid:hover {
+  background: #d4ff4a;
+  box-shadow: 0 6px 28px rgba(198, 243, 46, 0.35);
+}
+.btn-acid:active {
+  transform: scale(0.97);
+}
+.btn-acid:disabled {
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.btn-ghost {
+  border: 1px solid var(--color-line);
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: 14px;
+  padding: 0.7rem 1rem;
+  font-weight: 700;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.btn-ghost:hover {
+  border-color: var(--color-acid);
+}
+
+.card {
+  background: linear-gradient(180deg, var(--color-surface2), var(--color-surface));
+  border: 1px solid var(--color-line);
+  border-radius: 18px;
+  overflow: hidden;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.2s ease;
+}
+.card:active {
+  transform: scale(0.97);
+  border-color: rgba(198, 243, 46, 0.5);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+
+.chip {
+  white-space: nowrap;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface);
+  color: var(--color-muted);
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  transition: all 0.15s ease;
+}
+.chip.active {
+  background: var(--color-acid);
+  border-color: var(--color-acid);
+  color: #0a0c08;
+}
+
+.input {
+  width: 100%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: 0.7rem 0.9rem;
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.input:focus {
+  border-color: var(--color-acid);
+}
+
+.label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-muted);
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* модалка-шторка снизу (как нативный sheet в Telegram) */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 5, 8, 0.7);
+  backdrop-filter: blur(6px);
+  z-index: 40;
+  animation: fadeIn 0.18s ease;
+}
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-bottom: none;
+  border-radius: 24px 24px 0 0;
+  max-height: 88dvh;
+  overflow-y: auto;
+  animation: slideUp 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes popIn {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.pop-in {
+  animation: popIn 0.3s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.price-tag {
+  font-family: var(--font-display);
+  color: var(--color-acid);
+  text-shadow: 0 0 18px rgba(198, 243, 46, 0.35);
+}
+
+.glow-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-acid);
+  box-shadow: 0 0 10px var(--color-acid);
+  display: inline-block;
+}

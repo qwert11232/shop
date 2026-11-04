@@ -62,3 +62,10 @@ blob-report/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Локальная БД и загруженные владельцем фото
+*.db
+*.db-journal
+public/uploads/
+*.db-wal
+*.db-shm
