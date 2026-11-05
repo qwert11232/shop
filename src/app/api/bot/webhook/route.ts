@@ -799,6 +799,13 @@ async function handleCallback(update: BotUpdate): Promise<void> {
     // bulk:hide:<catId> | bulk:show:<catId> | bulk:price:<catId> — выполняем сразу,
     // кроме цены: процент ещё нужно ввести.
     case "bulk": {
+      // Кнопка «Массовые действия» на экране товаров приходит без аргумента:
+      // показываем список категорий, иначе разбор ":" ниже даёт «не найдена».
+      if (!arg) {
+        await answerCallback(query.id);
+        await render(chatId, bulkScreen(await listCategoriesAdmin()), messageId);
+        return;
+      }
       const [kind, categoryId] = arg.split(":");
       const categories = await listCategoriesAdmin();
       const category = categories.find((item) => item.id === categoryId);

@@ -502,6 +502,14 @@ async function main() {
   const bulkCategories = await repo.listCategoriesAdmin();
   const bulkTarget = bulkCategories.find((c) => c.productCount >= 2)!;
   assert(Boolean(bulkTarget), "для массовых действий есть категория с товарами");
+  // Кнопка «Массовые действия» без категории должна показывать выбор категории,
+  // а не «Категория не найдена» (регрессия после удаления дубликата case "bulk").
+  const bulkHub = adminScreens.bulkScreen(bulkCategories);
+  assert(bulkHub.text.includes("Массовые действия"), "голый callback bulk открывает выбор категории");
+  assert(
+    bulkHub.keyboard.inline_keyboard.flat().some((b) => "callback_data" in b && b.callback_data === `bulkcat:${bulkTarget.id}`),
+    "в списке массовых действий есть кнопка категории",
+  );
   const beforeBulk = await flow.categoryVisibility(bulkTarget.id);
   assert(beforeBulk.active === beforeBulk.total, "в тестовой категории все товары видны");
 
