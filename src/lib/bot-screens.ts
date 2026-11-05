@@ -91,7 +91,7 @@ export function menuScreen(stats: {
       { text: "Покупатели", callback_data: "customers" },
       { text: "Сводка", callback_data: "stats" },
     ],
-    [{ text: stats.paymentConfigured ? "Оплата настроена" : "Настроить оплату", callback_data: "pay" }],
+    [{ text: stats.paymentConfigured ? "Оплата и реквизиты" : "Настроить оплату", callback_data: "pay" }],
     [{ text: "Открыть витрину", url: appUrl() }],
   ];
 

@@ -704,7 +704,9 @@ export function paymentScreen(settings: ShopSettings): { text: string; keyboard:
     const value = settings[def.key];
     lines.push(`<b>${def.label}:</b> ${value ? esc(value) : "<i>не задано</i>"}`);
   }
-  lines.push("", "<i>Нажмите строку, чтобы изменить. Пустое сообщение стирает значение.</i>");
+  // Текст должен совпадать с тем, что реально делает бот: стирает «-», а не пустое
+  // сообщение — Telegram не даёт отправить пустую строку.
+  lines.push("", "<i>Нажмите строку, чтобы изменить. Пришлите «-», чтобы стереть значение.</i>");
 
   // По две кнопки в ряд: четыре пункта не растягивают сообщение.
   const rows: InlineButton[][] = [
