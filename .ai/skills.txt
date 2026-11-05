@@ -62,9 +62,9 @@
 # и удалите остальное: список — не склад, а рабочая комплектация под задачу.
 # ==============================================================================
 
-# --- Telegram Mini Apps --------------------------------------------------------
+# --- Telegram Mini Apps (активно для ТЕХНОЛАБ) ---------------------------------
 # Готовый набор ИИ-скиллов: развёртывание, валидация initData по HMAC-SHA256, вызовы SDK.
-# # GITHUB_ID: Rithprohos/telegram-mini-app-skills
+GITHUB_ID: Rithprohos/telegram-mini-app-skills
 #
 # Библиотека React-компонентов от Telegram: iOS Human Interface и Material Design.
 # # GITHUB_ID: telegram-mini-apps-dev/TelegramUI
