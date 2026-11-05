@@ -81,7 +81,9 @@ async function main() {
  */
 async function checkEmptyDatabaseBootstrap() {
   const { __setDbForCheck } = await import("../src/lib/db");
-  const { ensurePostgresSchema, POSTGRES_SCHEMA_SQL } = await import("../src/lib/db-postgres-schema");
+  const { ensurePostgresSchema, POSTGRES_SCHEMA_SQL, POSTGRES_MIGRATIONS_SQL } = await import(
+    "../src/lib/db-postgres-schema"
+  );
   const { seedCatalog } = await import("../src/lib/seed");
   const { listCatalog } = await import("../src/lib/repo");
 
@@ -101,7 +103,8 @@ async function checkEmptyDatabaseBootstrap() {
   assert(true, "схема накатывается на пустую базу (DDL из db-setup.sql)");
 
   const seeded = await seedCatalog();
-  assert(seeded.products === 17 && seeded.categories === 6, "сид создал 6 категорий и 17 товаров");
+  // Товары делятся на основную линейку (17) и аксессуары для блока «с этим покупают».
+  assert(seeded.products === 21 && seeded.categories === 6, "сид создал 6 категорий и 21 товар");
 
   const again = await seedCatalog();
   assert(again.products === 0 && again.categories === 0, "повторный сид идемпотентен — дублей нет");
@@ -109,7 +112,7 @@ async function checkEmptyDatabaseBootstrap() {
   const catalog = await listCatalog();
   assert(catalog.length === 6, "витрина видит 6 категорий");
   const total = catalog.reduce((n, c) => n + c.products.length, 0);
-  assert(total === 17, "витрина видит 17 товаров");
+  assert(total === 21, "витрина видит 21 товар");
   assert(catalog.every((c) => c.products.length > 0), "нет пустых категорий");
   assert(catalog.every((c) => c.products.every((p) => p.price > 0)), "у всех товаров цена в копейках");
   assert(catalog.every((c) => c.products.every((p) => p.photoUrl.startsWith("/products/"))), "у всех товаров фото из public/products");
@@ -120,8 +123,8 @@ async function checkEmptyDatabaseBootstrap() {
   const normalize = (sql: string) =>
     sql.replace(/--[^\n]*/g, "").replace(/\s+/g, " ").replace(/BEGIN|COMMIT|;/gi, "").trim();
   assert(
-    normalize(POSTGRES_SCHEMA_SQL) === normalize(setupSql.split("COMMIT")[0]),
-    "POSTGRES_SCHEMA_SQL и db-setup.sql совпадают по операторам",
+    normalize(POSTGRES_SCHEMA_SQL + POSTGRES_MIGRATIONS_SQL) === normalize(setupSql.split("COMMIT")[0]),
+    "POSTGRES_SCHEMA_SQL + миграции совпадают с db-setup.sql по операторам",
   );
 
   __setDbForCheck(null);

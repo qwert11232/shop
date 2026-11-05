@@ -256,3 +256,26 @@ body {
     opacity: 1;
   }
 }
+
+/* ── витрина: микроанимации экранов ────────────────────────────────────────
+   fade-in при появлении экрана, slide-up у панели фильтров и тоста.
+   Движение короткое (120–220 мс) и отключается системной настройкой выше. */
+.screen-enter {
+  animation: slideUp 0.22s ease-out;
+}
+.fade-in {
+  animation: fadeIn 0.18s ease-out;
+}
+.toast-enter {
+  animation: slideUp 0.16s ease-out;
+}
+
+/* Табличный набор цифр: суммы не «прыгают» при смене количества */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Нижняя навигация: безопасная зона iPhone/Android */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

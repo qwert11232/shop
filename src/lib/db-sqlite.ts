@@ -47,6 +47,104 @@ CREATE TABLE IF NOT EXISTS order_limits (
   created_at   INTEGER NOT NULL
 );
 
+-- Варианты товара: цвет, объём памяти, комплектация. Цена — копейки.
+CREATE TABLE IF NOT EXISTS product_variants (
+  id         TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  label      TEXT NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'variant',
+  extra      INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active  INTEGER NOT NULL DEFAULT 1
+);
+
+-- Характеристики: «память 256 ГБ», «мощность 1600 Вт» — по ним идёт сравнение.
+CREATE TABLE IF NOT EXISTS product_specs (
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  group_name TEXT NOT NULL DEFAULT 'Основное',
+  name       TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  unit       TEXT NOT NULL DEFAULT '',
+  numeric    REAL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (product_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS product_media (
+  id         TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL DEFAULT 'image',
+  url        TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+-- Отзывы: только после доставки заказа; один отзыв на товар от пользователя.
+CREATE TABLE IF NOT EXISTS reviews (
+  id         TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  tg_user_id TEXT NOT NULL,
+  author     TEXT NOT NULL,
+  rating     INTEGER NOT NULL,
+  text       TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS favorites (
+  tg_user_id TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (tg_user_id, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS cart_items (
+  tg_user_id TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  variant_id TEXT,
+  quantity   INTEGER NOT NULL DEFAULT 1,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (tg_user_id, product_id, variant_id)
+);
+
+-- Профиль клиента: телефон и имя для быстрого оформления, бонусный баланс.
+CREATE TABLE IF NOT EXISTS customers (
+  tg_user_id    TEXT PRIMARY KEY,
+  first_name    TEXT NOT NULL DEFAULT '',
+  username      TEXT NOT NULL DEFAULT '',
+  phone         TEXT NOT NULL DEFAULT '',
+  bonus_balance INTEGER NOT NULL DEFAULT 0,
+  referral_code TEXT NOT NULL DEFAULT '',
+  referred_by   TEXT,
+  created_at    INTEGER NOT NULL
+);
+
+-- Движение бонусов: начисление, списание, реферал. Баланс всегда выводим из журнала.
+CREATE TABLE IF NOT EXISTS bonus_events (
+  id         TEXT PRIMARY KEY,
+  tg_user_id TEXT NOT NULL,
+  amount     INTEGER NOT NULL,
+  reason     TEXT NOT NULL,
+  order_id   TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS order_items (
+  order_id   TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL,
+  variant_id TEXT,
+  title      TEXT NOT NULL,
+  variant    TEXT NOT NULL DEFAULT '',
+  price      INTEGER NOT NULL,
+  quantity   INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS order_events (
+  id         TEXT PRIMARY KEY,
+  order_id   TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  status     TEXT NOT NULL,
+  actor      TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
 -- Состояние диалога админ-бота: переживает холодный старт инстанса.
 CREATE TABLE IF NOT EXISTS bot_state (
   chat_id    TEXT PRIMARY KEY,
@@ -57,15 +155,45 @@ CREATE TABLE IF NOT EXISTS bot_state (
 
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(tg_user_id);
+CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants(product_id);
+CREATE INDEX IF NOT EXISTS idx_media_product ON product_media(product_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id);
+CREATE INDEX IF NOT EXISTS idx_cart_user ON cart_items(tg_user_id);
+CREATE INDEX IF NOT EXISTS idx_bonus_user ON bonus_events(tg_user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id);
 CREATE INDEX IF NOT EXISTS idx_order_limits_client ON order_limits(client_key, created_at);
 `;
+
+/**
+ * Догоняющие колонки для баз, созданных до появления корзины и доставки.
+ * SQLite не умеет `ADD COLUMN IF NOT EXISTS`, поэтому состав колонок
+ * сверяется через pragma — повторный запуск безопасен.
+ */
+function migrateSqlite(db: Database.Database): void {
+  const columns = (table: string) =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+
+  const ensure = (table: string, column: string, ddl: string) => {
+    if (!columns(table).includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  };
+
+  ensure("orders", "delivery_status", "TEXT NOT NULL DEFAULT 'new'");
+  ensure("orders", "track_number", "TEXT NOT NULL DEFAULT ''");
+  ensure("orders", "total", "INTEGER NOT NULL DEFAULT 0");
+  ensure("orders", "bonus_used", "INTEGER NOT NULL DEFAULT 0");
+  ensure("orders", "bonus_earned", "INTEGER NOT NULL DEFAULT 0");
+  ensure("orders", "contact_name", "TEXT NOT NULL DEFAULT ''");
+  ensure("orders", "contact_phone", "TEXT NOT NULL DEFAULT ''");
+  ensure("products", "brand", "TEXT NOT NULL DEFAULT ''");
+}
 
 export function createSqliteDb(file: string): Db {
   const db = new Database(path.resolve(process.cwd(), file));
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  migrateSqlite(db);
 
   /**
    * SQLite не умеет bind для boolean: `false` роняет запрос целиком.

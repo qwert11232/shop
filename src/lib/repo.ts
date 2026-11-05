@@ -30,6 +30,10 @@ export type Order = {
   groupMessageId: string | null;
   createdAt: string;
   productId: string;
+  /** Статус доставки и трек — меняются владельцем в боте, видны клиенту в кабинете. */
+  deliveryStatus: string;
+  trackNumber: string;
+  total: number;
 };
 
 type CategoryRow = {
@@ -42,6 +46,7 @@ type ProductRow = {
 type OrderRow = {
   id: string; status: string; comment: string; tg_user_id: string | null; first_name: string | null;
   username: string | null; group_message_id: string | null; created_at: string; product_id: string;
+  delivery_status: string | null; track_number: string | null; total: number | string | null;
 };
 
 const cat = (r: CategoryRow): Category => ({
@@ -56,6 +61,9 @@ const ord = (r: OrderRow): Order => ({
   id: r.id, status: r.status, comment: r.comment, tgUserId: r.tg_user_id, firstName: r.first_name,
   username: r.username, groupMessageId: r.group_message_id, createdAt: String(r.created_at),
   productId: r.product_id,
+  deliveryStatus: r.delivery_status ?? "new",
+  trackNumber: r.track_number ?? "",
+  total: Number(r.total ?? 0),
 });
 
 function uid(): string {
@@ -240,6 +248,16 @@ export type AdminOrder = Order & {
 };
 
 /** Заявки одного статуса для бота: новые сверху. */
+/** Число позиций в заказе — витрина оформляет заказы из корзины. */
+export async function countOrderItems(orderId: string): Promise<number> {
+  const db = await getDb();
+  const row = await db.get<{ c: number | string }>(
+    "SELECT COUNT(*) AS c FROM order_items WHERE order_id = ?",
+    [orderId],
+  );
+  return Number(row?.c ?? 0);
+}
+
 export async function listOrdersByStatus(status: OrderStatus, limit = 10): Promise<AdminOrder[]> {
   const db = await getDb();
   const rows = await db.all<OrderRow & { producttitle: string; productprice: number; productphoto: string }>(

@@ -54,6 +54,11 @@ export function withStatusLine(text: string, status: OrderStatus, actor: string)
   return `${text}\n\n— статус: ${label[status]} (${actor})`;
 }
 
+/** Подпись статуса доставки для сообщения в группе. */
+export function withDeliveryLine(text: string, delivery: string, actor: string): string {
+  return `${text}\n\n— доставка: ${delivery} (${actor})`;
+}
+
 /**
  * Разбор callback_data вида `status:<orderId>:<status>`.
  * id заявки содержит дефисы, но не двоеточия, поэтому split по «:» безопасен,

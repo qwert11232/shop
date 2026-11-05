@@ -1,6 +1,7 @@
 import { isOrderStatus, orderStatusLabel, type AdminOrder, type OrderStatus, type Product } from "./repo";
 import { appUrl } from "./bot-access";
 import type { InlineButton, Keyboard } from "./bot-api";
+import { DELIVERY_STEPS, deliveryLabel, type DeliveryStatus } from "./shop";
 
 /**
  * Экраны админ-бота: чистая функция «данные → текст + клавиатура», без сети.
@@ -139,17 +140,55 @@ const STATUS_ACTION: Record<OrderStatus, string> = {
   cancelled: "Отменить",
 };
 
+/**
+ * Кнопки доставки: владелец ведёт заказ «Собирается» → «Передан в доставку» →
+ * «Ждёт в ПВЗ» → «Получен». Следующий шаг всегда первым — искать не нужно.
+ */
+export function nextDeliveryStep(current: string): DeliveryStatus | null {
+  if (current === "cancelled" || current === "done") return null;
+  const index = DELIVERY_STEPS.indexOf(current as DeliveryStatus);
+  if (index === -1) return "packing";
+  return DELIVERY_STEPS[Math.min(index + 1, DELIVERY_STEPS.length - 1)];
+}
+
+function deliveryButtons(orderId: string, current: string): InlineButton[][] {
+  const rows: InlineButton[][] = [];
+  const next = nextDeliveryStep(current);
+  if (next) {
+    rows.push([{ text: `Дальше: ${deliveryLabel(next)}`, callback_data: `delivery:${orderId}:${next}` }]);
+  }
+  const others: DeliveryStatus[] = (["packing", "shipped", "pickup", "done"] as DeliveryStatus[]).filter(
+    (step) => step !== next && step !== current,
+  );
+  const row: InlineButton[] = others.map((step) => ({
+    text: deliveryLabel(step),
+    callback_data: `delivery:${orderId}:${step}`,
+  }));
+  if (row.length) rows.push(row);
+  rows.push([
+    { text: "Трек-номер", callback_data: `track:${orderId}` },
+    current === "cancelled"
+      ? { text: "Вернуть в работу", callback_data: `delivery:${orderId}:packing` }
+      : { text: "Отменить", callback_data: `delivery:${orderId}:cancelled` },
+  ]);
+  return rows;
+}
+
 export function orderCardScreen(order: AdminOrder): Screen {
   const who = order.firstName ? esc(order.firstName) : "Гость";
   const handle = order.username ? ` @${esc(order.username)}` : "";
   const tgId = order.tgUserId ? `\nID: <code>${esc(order.tgUserId)}</code>` : "";
+  const delivery = order.deliveryStatus || "new";
   const text = [
     `<b>${esc(order.productTitle)}</b>`,
-    `${money(order.productPrice)} · ${orderStatusLabel(order.status)}`,
+    `${money(order.total || order.productPrice)} · ${orderStatusLabel(order.status)}`,
     "",
     `Клиент: ${who}${handle}${tgId}`,
     `Создана: ${shortDate(order.createdAt)}`,
     order.comment ? `Комментарий: <i>${esc(order.comment)}</i>` : "",
+    "",
+    `<b>Доставка:</b> ${deliveryLabel(delivery)}`,
+    order.trackNumber ? `Трек-номер: <code>${esc(order.trackNumber)}</code>` : "Трек-номер не указан",
     order.groupMessageId ? `Сообщение в группе: #${esc(order.groupMessageId)}` : "",
   ]
     .filter(Boolean)
@@ -165,6 +204,7 @@ export function orderCardScreen(order: AdminOrder): Screen {
     text,
     keyboard: {
       inline_keyboard: [
+        ...deliveryButtons(order.id, delivery),
         actions.length ? actions : [],
         [
           { text: "‹ Заявки", callback_data: `orders:${order.status}` },
@@ -173,6 +213,28 @@ export function orderCardScreen(order: AdminOrder): Screen {
       ].filter((row) => row.length > 0),
     },
   };
+}
+
+/** Подсказка при вводе трек-номера. */
+export function trackPromptScreen(order: AdminOrder): Screen {
+  return {
+    text: [
+      `<b>Трек-номер заказа № ${esc(order.id)}</b>`,
+      "",
+      "Пришлите номер посылки одним сообщением — до 40 символов, латиница, цифры и дефис.",
+      "Клиент увидит его в личном кабинете, в карточке заказа.",
+    ].join("\n"),
+    keyboard: {
+      inline_keyboard: [[{ text: "‹ Отмена", callback_data: `order:${order.id}` }]],
+    },
+  };
+}
+
+/** Проверка формата трека: без пробелов, не длиннее 40 символов. */
+export function normalizeTrack(raw: string): string | null {
+  const value = raw.trim().toUpperCase().replace(/\s+/g, "");
+  if (!/^[A-Z0-9-]{4,40}$/.test(value)) return null;
+  return value;
 }
 
 const PAGE_SIZE = 5;

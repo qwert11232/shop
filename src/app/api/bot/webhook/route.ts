@@ -18,14 +18,17 @@ import {
   notConfiguredScreen,
   orderCardScreen,
   ordersScreen,
+  normalizeTrack,
   productCardScreen,
   productsScreen,
   savedScreen,
+  trackPromptScreen,
   esc,
   type Screen,
 } from "@/lib/bot-screens";
 import { buildOrderMessage, userLabel } from "@/lib/telegram";
-import { withStatusLine } from "@/lib/order-message";
+import { deliveryLabel, isDeliveryStatus, setDeliveryStatus } from "@/lib/shop";
+import { withDeliveryLine, withStatusLine } from "@/lib/order-message";
 import {
   clearBotSession,
   countsForBot,
@@ -170,13 +173,36 @@ async function handleMessage(message: BotMessage): Promise<void> {
   }
 }
 
-async function handleFieldInput(chatId: number, kind: string, productId: string, text: string) {
+async function handleFieldInput(chatId: number, kind: string, payload: string, text: string) {
+  // kind="track", payload=<orderId> — владелец вводит трек-номер заявки
+  if (kind === "track") {
+    const order = await getOrderById(payload);
+    if (!order) {
+      await sendMessage(chatId, "Заявка не найдена — возможно, её удалили.");
+      return;
+    }
+    const track = normalizeTrack(text);
+    if (!track) {
+      await sendMessage(chatId, "Нужен трек-номер из 4–40 символов: латиница, цифры, дефис. Например: RU123456789.");
+      await setBotSession({ chatId: String(chatId), kind: "track", payload: order.id });
+      return;
+    }
+    await setDeliveryStatus(order.id, isDeliveryStatus(order.deliveryStatus) ? order.deliveryStatus : "new", track);
+    const updated = await getOrderById(order.id);
+    if (!updated) {
+      await sendMessage(chatId, "Заявка не найдена.");
+      return;
+    }
+    await render(chatId, orderCardScreen(updated));
+    return;
+  }
+
   if (kind !== "edit") {
     await sendMessage(chatId, "Не понял, что изменить. Откройте карточку товара и нажмите нужное поле.");
     return;
   }
   // kind="edit", payload="<productId>:<field>"
-  const [id, field] = productId.split(":");
+  const [id, field] = payload.split(":");
   const product = await getProductById(id);
   if (!product) {
     await sendMessage(chatId, "Товар не найден — возможно, его удалили.");
@@ -276,6 +302,8 @@ async function syncGroupStatus(
   order: Awaited<ReturnType<typeof getOrderById>>,
   status: OrderStatus,
   actor: string,
+  /** Статус доставки — если сообщение обновили из-за него, а не из-за заявки. */
+  delivery?: string,
 ): Promise<void> {
   if (!order?.groupMessageId || !process.env.GROUP_CHAT_ID) return;
   const product = await getProductById(order.productId);
@@ -294,7 +322,9 @@ async function syncGroupStatus(
   await editMessage(
     process.env.GROUP_CHAT_ID,
     Number(order.groupMessageId),
-    withStatusLine(base, status, actor),
+    delivery
+      ? withDeliveryLine(base, deliveryLabel(delivery), actor)
+      : withStatusLine(base, status, actor),
   );
 }
 
@@ -364,6 +394,38 @@ async function handleCallback(update: BotUpdate): Promise<void> {
         // То же сообщение в группе помечаем статусом — чтобы группа не висела «новой».
         await syncGroupStatus(order, next, query.from.first_name);
       }
+      return;
+    }
+
+    case "delivery": {
+      const [orderId, next] = arg.split(":");
+      if (!isDeliveryStatus(next)) {
+        await answerCallback(query.id, "Неизвестный статус доставки");
+        return;
+      }
+      const ok = await setDeliveryStatus(orderId, next);
+      if (!ok) {
+        await answerCallback(query.id, "Заявка не найдена");
+        return;
+      }
+      const order = await getOrderById(orderId);
+      await answerCallback(query.id, `Доставка: ${deliveryLabel(next)}`);
+      if (order) {
+        await render(chatId, orderCardScreen(order), messageId);
+        await syncGroupStatus(order, (order.status as OrderStatus) ?? "new", query.from.first_name, next);
+      }
+      return;
+    }
+
+    case "track": {
+      const order = await getOrderById(arg);
+      await answerCallback(query.id);
+      if (!order) {
+        await sendMessage(chatId, "Заявка не найдена.");
+        return;
+      }
+      await render(chatId, trackPromptScreen(order), messageId);
+      await setBotSession({ chatId: String(chatId), kind: "track", payload: order.id });
       return;
     }
 

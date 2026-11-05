@@ -101,6 +101,40 @@ async function main() {
   assert(counts.revenueDone === product.price, "выручка считается по выполненным заявкам");
   assert(!(await repo.setOrderStatus("нет-такой", "done")), "несуществующая заявка не меняется молча");
 
+  // ── Статусы доставки и трек-номер (меняет владелец в боте) ────────────────
+  const shop = await import("../src/lib/shop");
+  const cardBefore = screens.orderCardScreen((await repo.getOrderById(order.id))!);
+  const deliveryButtons = cardBefore.keyboard!.inline_keyboard.flat();
+  assert(
+    deliveryButtons.some((b) => "callback_data" in b && b.callback_data === `delivery:${order.id}:packing`),
+    "в карточке заявки есть кнопка статуса доставки",
+  );
+  assert(
+    deliveryButtons.some((b) => "callback_data" in b && b.callback_data === `track:${order.id}`),
+    "в карточке заявки есть кнопка трек-номера",
+  );
+  assert(screens.nextDeliveryStep("packing") === "shipped", "следующий шаг доставки: передан в доставку");
+  assert(screens.nextDeliveryStep("done") === null, "после получения шагов больше нет");
+
+  assert(await shop.setDeliveryStatus(order.id, "shipped"), "статус доставки меняется");
+  const shipped = (await repo.getOrderById(order.id))!;
+  assert(shipped.deliveryStatus === "shipped", "статус доставки сохранён в заявке");
+
+  assert(screens.normalizeTrack("ru 123-456 789") === "RU123-456789", "трек-номер приводится к одному виду");
+  assert(screens.normalizeTrack("   ") === null, "пустой трек не принимается");
+  assert(screens.normalizeTrack("<b>x</b>") === null, "разметка в треке не принимается");
+
+  assert(await shop.setDeliveryStatus(order.id, "pickup", "RU123-456789"), "трек-номер записывается вместе со статусом");
+  const withTrack = (await repo.getOrderById(order.id))!;
+  assert(withTrack.trackNumber === "RU123-456789", "трек-номер сохранён");
+  const cardWithTrack = screens.orderCardScreen(withTrack);
+  assert(cardWithTrack.text.includes("RU123-456789"), "карточка показывает трек-номер клиенту-админу");
+  assert(cardWithTrack.text.includes("Ждёт в ПВЗ"), "карточка показывает человеческий статус доставки");
+
+  const prompt = screens.trackPromptScreen(withTrack);
+  assert(prompt.text.includes(order.id), "подсказка трека называет заявку");
+  assert(!(await shop.setDeliveryStatus("нет-такой", "done")), "несуществующая заявка не получает статус доставки");
+
   // ── Правка товара ─────────────────────────────────────────────────────────
   const updated = await repo.updateProduct(product.id, { priceKopecks: 1234500 });
   assert(updated?.price === 1234500, "цена товара обновляется");

@@ -56,16 +56,34 @@ Telegram Mini App «витрина магазина техники». Владе
 
 ## Модель данных (SQLite локально — `src/lib/db.ts`; PostgreSQL прод — `db-setup.sql`)
 
-- `Category` — id, name, icon (эмодзи), sortOrder, isActive → `products`
-- `Product` — id, title, description, **price в копейках (Int)**, photoUrl, isActive, categoryId → `orders`
+Витрина (v0004, 14 таблиц):
+
+- `Category` — id, name, icon, sortOrder, isActive → `products`
+- `Product` — id, title, description, **price в копейках**, photoUrl, brand, isActive, categoryId
+- `ProductVariant` — id, productId, label, kind (color/storage/config/size), **extra в копейках**
+  (может быть отрицательной: младшая память дешевле)
+- `ProductSpec` — productId, groupName, name, value, unit, numeric, sortOrder;
+  в той же таблице живут связи cross-sell (`group_name = 'cross-sell'`)
+- `ProductMedia` — productId, kind (image/video), url, sortOrder → галерея карточки
+- `Review` — id, productId, tgUserId, author, rating 1–5, text, createdAt
+- `Favorite` — tgUserId + productId (переключатель)
+- `CartItem` — tgUserId, productId, variantId, quantity 1–99
+- `Customer` — tgUserId, firstName, username, phone, bonusBalance, referralCode, referredBy
+- `BonusEvent` — amount (±), reason, orderId, createdAt — журнал, из него выводится баланс
 - `Order` — id, status (new/contacted/done/cancelled), comment, tgUserId, firstName, username,
-  groupMessageId, productId, createdAt
+  groupMessageId, productId, createdAt + доставка: deliveryStatus (new/packing/shipped/pickup/done/cancelled),
+  trackNumber, total, bonusUsed, bonusEarned, contactName, contactPhone
+- `OrderItem` — orderId, productId, variantId, title, variant, price, quantity
+- `OrderEvent` — orderId, status, actor (admin/client), createdAt — история переходов
+
+Итого цена позиции = `products.price + product_variants.extra`; всё в копейках.
 
 ## API
 
 | Метод | Путь | Доступ | Назначение |
 | --- | --- | --- | --- |
-| GET | `/api/catalog` | публичный | категории + активные товары; на первом запросе наполняет пустую базу |
+| GET | `/api/catalog` | публичный | категории + активные товары; `?flat=1` — плоский список с фильтрами, брендами и фасетами |
+| GET | `/api/catalog/[id]` | публичный | карточка: варианты, характеристики, галерея, отзывы, cross-sell, признак избранного |
 | GET | `/api/health` | публичный | проверка деплоя: диалект БД, счётчики, хранилище, бот (200/503) |
 | POST | `/api/orders` | любой (initData валидируется) | создать заявку, отправить в группу; антидубль 60 с и лимит 5/мин → 429 |
 | GET | `/api/admin/products` | владелец | список товаров |
@@ -75,18 +93,34 @@ Telegram Mini App «витрина магазина техники». Владе
 | POST | `/api/admin/upload` | владелец | загрузка фото (multipart, ≤ 8 МБ, jpg/png/webp) → S3 или `public/uploads/` |
 | POST | `/api/bot/webhook` | Telegram (по секрету) | админ-бот: команды, кнопки, статусы |
 | GET/POST | `/api/bot/setup` | `BOT_SETUP_TOKEN` | вебхук, команды меню, диагностика (см. `docs/TELEGRAM-BOT.md`) |
+| GET/POST | `/api/cart` | initData | корзина; `POST {action: add/set/remove}` возвращает пересчитанную корзину |
+| POST | `/api/checkout` | initData | оформление из корзины: цены и бонусы считает сервер, заказ уходит в группу |
+| GET/POST | `/api/favorites` | initData | избранное: список и переключатель |
+| GET | `/api/compare?ids=` | публичный | сравнение 2–3 товаров по общим характеристикам |
+| GET/POST | `/api/me` | initData | профиль, бонусы, реферальный код; телефон и ввод кода друга |
+| GET | `/api/me/orders` | initData | история заказов со статусами доставки и треками |
+| GET/POST | `/api/reviews` | GET публичный, POST initData | отзывы; написать можно только после заказа `done` |
 
 ## Переменные окружения (см. `.env.example`)
 
-`DATABASE_URL`, `BOT_TOKEN`, `GROUP_CHAT_ID`, `OWNER_TELEGRAM_ID`, `WEBAPP_URL`, `ALLOW_DEV_NO_AUTH`
+`DATABASE_URL`, `BOT_TOKEN`, `BOT_WEBHOOK_SECRET`, `BOT_SETUP_TOKEN`, `ADMIN_TELEGRAM_IDS`,
+`ADMIN_TELEGRAM_USERNAMES`, `GROUP_CHAT_ID`, `WEBAPP_URL`, `AUTO_SEED`, `S3_*`, `ALLOW_DEV_NO_AUTH`
+
+`AUTO_SEED` включён по умолчанию: сид идемпотентный, достраивает у существующих
+товаров бренды, варианты и характеристики (нужно после обновления схемы), а `AUTO_SEED=0`
+выключает его, когда каталог ведётся только через `/admin`.
 
 ## Стек
 
 - **Next.js 15 (App Router) + React 19 + TypeScript**
 - **Tailwind CSS v4** (дизайн-токены в `globals.css`, см. `docs/DESIGN.md`)
 - **БД:** диалект выбирается по `DATABASE_URL`: `file:` → SQLite (`better-sqlite3`), `postgres://` → PostgreSQL (`pg`).
-  Единый интерфейс — `src/lib/db.ts` (`all/get/run`, плейсхолдеры `?`), доступ только через `src/lib/repo.ts`.
+  Единый интерфейс — `src/lib/db.ts` (`all/get/run`, плейсхолдеры `?`), доступ к данным —
+  `src/lib/repo.ts` (владелец, каталог), `src/lib/catalog.ts` (витрина, фильтры, сравнение, избранное),
+  `src/lib/shop.ts` (профиль, бонусы, корзина, заказы, доставка), `src/lib/reviews.ts`.
   Схема PG — `db-setup.sql`; проверка SQL на настоящем PG — `npm run check:pg` (pglite в WASM).
+- **Проверки:** `npm run check` = lint + typecheck + `check:storage` + `check:pg` + `check:bot` + `check:shop`
+  (витрина: фильтры, корзина, заказ, бонусы, отзывы, сравнение — на настоящей SQLite-базе).
 - **Фото:** `src/lib/storage.ts` — S3-совместимое хранилище (`S3_*`) или локальный `public/uploads/`;
   на Vercel без S3 загрузка отвечает 501 вместо тихой потери файла.
 - **Лимиты заявок:** таблица `order_limits` в БД — общая для всех инстансов и переживает рестарт.
@@ -97,10 +131,11 @@ Telegram Mini App «витрина магазина техники». Владе
 - **Схема на деплое:** `src/lib/db-postgres-schema.ts` применяет тот же DDL, что `db-setup.sql`,
   при первом подключении (идемпотентно). На Neon/Supabase нет CLI миграций, поэтому без этого
   каталог отвечал бы 500 «relation does not exist».
-- **Стартовый каталог:** `src/lib/catalog-seed.ts` — 6 категорий и 17 товаров с ценами,
-  описаниями и фото. `src/lib/seed.ts` заливает их идемпотентно; включается `AUTO_SEED`
-  (на Vercel по умолчанию) или `npm run db:seed` локально.
-- Шрифты: Unbounded + Manrope (кириллица) через `@fontsource/*`
+- **Стартовый каталог:** `src/lib/catalog-seed.ts` — 6 категорий, 17 товаров и 4 аксессуара
+  с ценами, брендами, характеристиками, вариантами и связями «с этим покупают».
+  `src/lib/seed.ts` заливает их идемпотентно и достраивает недостающее у товаров,
+  созданных прошлым деплоем; включается по умолчанию, `AUTO_SEED=0` отключает.
+- Шрифты: Manrope (кириллица) через `@fontsource/*`
 - Без сторонних UI-библиотек; нативный Telegram WebApp SDK подключается скриптом
 
 ## Деплой
