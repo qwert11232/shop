@@ -48,9 +48,15 @@ export default function Catalog() {
       tg.expand();
     }
     fetch("/api/catalog")
-      .then((r) => r.json())
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || `Сервер ответил ${r.status}`);
+        return data;
+      })
       .then((d) => setCats(d.categories ?? []))
-      .catch(() => setError("Каталог не загрузился. Проверьте связь и обновите страницу."))
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : "Каталог не загрузился. Обновите страницу."),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -139,13 +145,32 @@ export default function Catalog() {
       {/* счётчик позиций вместо декоративной подписи */}
       <div className="flex items-baseline justify-between mt-4 mb-2">
         <h1 className="font-display font-bold text-[15px]">{activeName}</h1>
-        <span className="meta">
-          {products.length} {products.length === 1 ? "позиция" : products.length < 5 ? "позиции" : "позиций"}
-        </span>
+        {!error && (
+          <span className="meta">
+            {products.length} {products.length === 1 ? "позиция" : products.length < 5 ? "позиции" : "позиций"}
+          </span>
+        )}
       </div>
 
       {error && !selected && (
-        <p className="text-[13px] text-signal border border-signal rounded-[10px] px-3 py-2 mb-3">{error}</p>
+        <div className="border border-signal rounded-[10px] px-3 py-3 mb-3">
+          <p className="text-[13px] font-semibold text-signal">Каталог не загрузился</p>
+          <p className="text-[12px] text-ink-2 mt-1 leading-relaxed">{error}</p>
+          <button
+            className="btn-ghost mt-2.5"
+            onClick={() => {
+              setError("");
+              setLoading(true);
+              fetch("/api/catalog")
+                .then((r) => r.json())
+                .then((d) => setCats(d.categories ?? []))
+                .catch(() => setError("Сервер недоступен. Попробуйте позже."))
+                .finally(() => setLoading(false));
+            }}
+          >
+            Повторить
+          </button>
+        </div>
       )}
 
       {loading && (

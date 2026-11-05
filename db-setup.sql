@@ -12,7 +12,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS categories (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
-  icon        TEXT NOT NULL DEFAULT '📦',
+  icon        TEXT NOT NULL DEFAULT '',   -- legacy: эмодзи в UI не используются
   sort_order  INTEGER NOT NULL DEFAULT 0,
   is_active   BOOLEAN NOT NULL DEFAULT TRUE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()

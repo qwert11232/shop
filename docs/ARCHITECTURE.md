@@ -65,7 +65,8 @@ Telegram Mini App «витрина магазина техники». Владе
 
 | Метод | Путь | Доступ | Назначение |
 | --- | --- | --- | --- |
-| GET | `/api/catalog` | публичный | категории + активные товары |
+| GET | `/api/catalog` | публичный | категории + активные товары; на первом запросе наполняет пустую базу |
+| GET | `/api/health` | публичный | проверка деплоя: диалект БД, счётчики, хранилище, бот (200/503) |
 | POST | `/api/orders` | любой (initData валидируется) | создать заявку, отправить в группу; антидубль 60 с и лимит 5/мин → 429 |
 | GET | `/api/admin/products` | владелец | список товаров |
 | POST | `/api/admin/products` | владелец | добавить товар `{title, priceRub, description, categoryId, photoUrl}` |
@@ -87,6 +88,12 @@ Telegram Mini App «витрина магазина техники». Владе
 - **Фото:** `src/lib/storage.ts` — S3-совместимое хранилище (`S3_*`) или локальный `public/uploads/`;
   на Vercel без S3 загрузка отвечает 501 вместо тихой потери файла.
 - **Лимиты заявок:** таблица `order_limits` в БД — общая для всех инстансов и переживает рестарт.
+- **Схема на деплое:** `src/lib/db-postgres-schema.ts` применяет тот же DDL, что `db-setup.sql`,
+  при первом подключении (идемпотентно). На Neon/Supabase нет CLI миграций, поэтому без этого
+  каталог отвечал бы 500 «relation does not exist».
+- **Стартовый каталог:** `src/lib/catalog-seed.ts` — 6 категорий и 17 товаров с ценами,
+  описаниями и фото. `src/lib/seed.ts` заливает их идемпотентно; включается `AUTO_SEED`
+  (на Vercel по умолчанию) или `npm run db:seed` локально.
 - Шрифты: Unbounded + Manrope (кириллица) через `@fontsource/*`
 - Без сторонних UI-библиотек; нативный Telegram WebApp SDK подключается скриптом
 
@@ -99,6 +106,19 @@ Telegram Mini App «витрина магазина техники». Владе
 3. В `.env` продакшена: `BOT_TOKEN`, `GROUP_CHAT_ID`, `OWNER_TELEGRAM_ID`, `WEBAPP_URL=https://<домен>`, `ALLOW_DEV_NO_AUTH` — **выключить**.
 4. В @BotFather: `/setmenubutton` или кнопка WebApp в группе → URL = `WEBAPP_URL`.
 5. Готово: участники группы открывают приложение и оставляют заявки.
+
+## Диагностика деплоя
+
+Откройте `https://<домен>/api/health`:
+
+```json
+{ "ok": true, "dialect": "postgres", "counts": { "categories": 6, "products": 17 },
+  "checks": { "db": "postgres", "autoSeed": "1 (по умолчанию)", "storage": "s3",
+              "telegram": true, "owner": true } }
+```
+
+`ok: false` + `503` — база подключена, но каталог пуст (автонаполнение выключено).
+`500` с `error` — база недоступна: проверьте `DATABASE_URL` и `sslmode=require`.
 
 ## Локальный запуск
 

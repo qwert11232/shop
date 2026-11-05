@@ -7,8 +7,15 @@ function toPgPlaceholders(sql: string): string {
   return sql.replace(/\?/g, () => `$${++i}`);
 }
 
-/** Минимум от драйвера, который нужен адаптеру. Позволяет подменить пул в проверке. */
-export type PgClient = { query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }> };
+/**
+ * Минимум от драйвера, который нужен адаптеру. Позволяет подменить пул в проверке.
+ * `exec` — для DDL из нескольких операторов: node-postgres выполняет такое только
+ * простым протоколом (без массива значений), pglite — через свой `exec`.
+ */
+export type PgClient = {
+  query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
+  exec?(sql: string): Promise<void>;
+};
 
 /**
  * Прод-адаптер PostgreSQL. Пул один на процесс; SSL включается строкой
@@ -54,6 +61,10 @@ export function createPostgresDb(connectionString: string, client?: PgClient): D
       query<T[]>(sql, params).then((rows) => rows[0]),
     run: async (sql: string, params: unknown[] = []) => {
       await pool.query(toPgPlaceholders(sql), params);
+    },
+    exec: async (sql: string) => {
+      if (pool.exec) return pool.exec(sql);
+      await pool.query(sql);
     },
   };
 }

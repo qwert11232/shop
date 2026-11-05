@@ -78,5 +78,8 @@ export function createSqliteDb(file: string): Db {
     async run(sql: string, params: unknown[] = []) {
       prepare(sql).run(...params);
     },
+    async exec(sql: string) {
+      db.exec(sql);
+    },
   };
 }

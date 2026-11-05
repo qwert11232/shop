@@ -70,7 +70,61 @@ async function main() {
   const inserted = await db.get<{ m: number | string | null }>("SELECT MAX(sort_order) AS m FROM categories");
   assert(Number(inserted?.m) === 0, "MAX() по пустой выборке не ломает приведение");
 
+  await checkEmptyDatabaseBootstrap();
+
   console.log("[check:pg] PASS — SQL-слой совместим с PostgreSQL");
+}
+
+/**
+ * Главный сценарий деплоя: база пустая, приложение поднимает схему и само
+ * наполняет каталог. Ровно это выполняется на Vercel при первом запросе.
+ */
+async function checkEmptyDatabaseBootstrap() {
+  const { __setDbForCheck } = await import("../src/lib/db");
+  const { ensurePostgresSchema, POSTGRES_SCHEMA_SQL } = await import("../src/lib/db-postgres-schema");
+  const { seedCatalog } = await import("../src/lib/seed");
+  const { listCatalog } = await import("../src/lib/repo");
+
+  const pg = new PGlite();
+  const db = createPostgresDb("postgres://local/bootstrap", {
+    query: async (text: string, values?: unknown[]) => {
+      const res = await pg.query(text, values);
+      return { rows: res.rows };
+    },
+    exec: async (sql: string) => {
+      await pg.exec(sql);
+    },
+  });
+  __setDbForCheck(db);
+
+  await ensurePostgresSchema(db);
+  assert(true, "схема накатывается на пустую базу (DDL из db-setup.sql)");
+
+  const seeded = await seedCatalog();
+  assert(seeded.products === 17 && seeded.categories === 6, "сид создал 6 категорий и 17 товаров");
+
+  const again = await seedCatalog();
+  assert(again.products === 0 && again.categories === 0, "повторный сид идемпотентен — дублей нет");
+
+  const catalog = await listCatalog();
+  assert(catalog.length === 6, "витрина видит 6 категорий");
+  const total = catalog.reduce((n, c) => n + c.products.length, 0);
+  assert(total === 17, "витрина видит 17 товаров");
+  assert(catalog.every((c) => c.products.length > 0), "нет пустых категорий");
+  assert(catalog.every((c) => c.products.every((p) => p.price > 0)), "у всех товаров цена в копейках");
+  assert(catalog.every((c) => c.products.every((p) => p.photoUrl.startsWith("/products/"))), "у всех товаров фото из public/products");
+  assert(catalog.every((c) => c.products.every((p) => p.description.length > 20)), "у всех товаров описание заполнено");
+
+  // schema-файл и миграционный файл не должны расходиться
+  const setupSql = await readFile(path.join(process.cwd(), "db-setup.sql"), "utf8");
+  const normalize = (sql: string) =>
+    sql.replace(/--[^\n]*/g, "").replace(/\s+/g, " ").replace(/BEGIN|COMMIT|;/gi, "").trim();
+  assert(
+    normalize(POSTGRES_SCHEMA_SQL) === normalize(setupSql.split("COMMIT")[0]),
+    "POSTGRES_SCHEMA_SQL и db-setup.sql совпадают по операторам",
+  );
+
+  __setDbForCheck(null);
 }
 
 main().catch((err) => {
