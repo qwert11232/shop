@@ -11,6 +11,9 @@ export type Category = {
   createdAt: string;
 };
 export type Product = {
+  /** Бренд нужен витрине, фильтрам и панели; пустая строка — не указан. */
+  brand?: string;
+  categoryName?: string | null;
   id: string;
   title: string;
   description: string;
@@ -34,6 +37,11 @@ export type Order = {
   deliveryStatus: string;
   trackNumber: string;
   total: number;
+  /** Контакты и бонусы нужны владельцу: по ним он звонит и видит скидку. */
+  contactName: string;
+  contactPhone: string;
+  bonusUsed: number;
+  bonusEarned: number;
 };
 
 type CategoryRow = {
@@ -42,11 +50,14 @@ type CategoryRow = {
 type ProductRow = {
   id: string; title: string; description: string; price: number; photo_url: string;
   is_active: boolean | number; created_at: string; category_id: string;
+  brand?: string | null;
 };
 type OrderRow = {
   id: string; status: string; comment: string; tg_user_id: string | null; first_name: string | null;
   username: string | null; group_message_id: string | null; created_at: string; product_id: string;
   delivery_status: string | null; track_number: string | null; total: number | string | null;
+  contact_name: string | null; contact_phone: string | null; bonus_used: number | string | null;
+  bonus_earned: number | string | null;
 };
 
 const cat = (r: CategoryRow): Category => ({
@@ -56,6 +67,9 @@ const cat = (r: CategoryRow): Category => ({
 const prod = (r: ProductRow): Product => ({
   id: r.id, title: r.title, description: r.description, price: Number(r.price), photoUrl: r.photo_url,
   isActive: Boolean(r.is_active), createdAt: String(r.created_at), categoryId: r.category_id,
+  // Бренд читается из той же строки: без него фильтр и панель видят пустое поле,
+  // хотя в базе значение есть.
+  brand: r.brand ?? "",
 });
 const ord = (r: OrderRow): Order => ({
   id: r.id, status: r.status, comment: r.comment, tgUserId: r.tg_user_id, firstName: r.first_name,
@@ -64,6 +78,10 @@ const ord = (r: OrderRow): Order => ({
   deliveryStatus: r.delivery_status ?? "new",
   trackNumber: r.track_number ?? "",
   total: Number(r.total ?? 0),
+  contactName: r.contact_name ?? "",
+  contactPhone: r.contact_phone ?? "",
+  bonusUsed: Number(r.bonus_used ?? 0),
+  bonusEarned: Number(r.bonus_earned ?? 0),
 });
 
 function uid(): string {
@@ -127,15 +145,203 @@ export async function listProductsAdmin(): Promise<(Product & { categoryName: st
 }
 
 export async function createProduct(input: {
-  title: string; description: string; priceKopecks: number; photoUrl: string; categoryId: string;
+  title: string;
+  description?: string;
+  priceKopecks: number;
+  photoUrl?: string;
+  categoryId: string;
+  brand?: string;
 }): Promise<Product> {
   const db = await getDb();
   const id = uid();
   await db.run(
-    "INSERT INTO products (id, title, description, price, photo_url, category_id) VALUES (?, ?, ?, ?, ?, ?)",
-    [id, input.title, input.description, input.priceKopecks, input.photoUrl, input.categoryId],
+    "INSERT INTO products (id, title, description, price, photo_url, category_id, brand) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [
+      id,
+      input.title,
+      input.description ?? "",
+      input.priceKopecks,
+      input.photoUrl ?? "",
+      input.categoryId,
+      input.brand ?? "",
+    ],
   );
   return (await getProduct(id))!;
+}
+
+/**
+ * Поиск для бота: по названию и бренду, регистр не важен.
+ *
+ * Сравнение в JS, а не в SQL: `LOWER()` в SQLite понимает только латиницу,
+ * поэтому «пылесос» не находил «Пылесос». Товаров в магазине сотни, а не
+ * миллионы — читать список дешевле, чем получить неработающий поиск.
+ */
+export async function searchProductsAdmin(
+  query: string,
+  limit = 8,
+): Promise<(Product & { categoryName: string | null })[]> {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const all = await listProductsAdmin();
+  return all
+    .filter((p) => `${p.title} ${p.brand ?? ""}`.toLowerCase().includes(needle))
+    .slice(0, limit);
+}
+
+/**
+ * Ищет категорию по имени без учёта регистра; null — такой нет.
+ * Сравнение в JS по той же причине, что и в поиске: SQLite не знает
+ * кириллический регистр и вернул бы «нет совпадений» на существующую категорию.
+ */
+export async function categoryIdByName(name: string): Promise<string | null> {
+  const desired = name.trim().toLowerCase();
+  if (!desired) return null;
+  const rows = await listCategoriesAdmin();
+  return rows.find((c) => c.name.trim().toLowerCase() === desired)?.id ?? null;
+}
+
+/**
+ * Варианты и характеристики товара для админки. В отличие от витринного
+ * чтения, здесь нужны id вариантов: владелец удаляет их по кнопке.
+ */
+export async function listVariantsForAdmin(productId: string): Promise<
+  { id: string; label: string; kind: string; extra: number }[]
+> {
+  const db = await getDb();
+  const rows = await db.all<{ id: string; label: string; kind: string; extra: number | string }>(
+    "SELECT id, label, kind, extra FROM product_variants WHERE product_id = ? ORDER BY sort_order ASC, label ASC",
+    [productId],
+  );
+  return rows.map((r) => ({ id: r.id, label: r.label, kind: r.kind, extra: Number(r.extra) }));
+}
+
+export async function addVariant(input: {
+  productId: string;
+  label: string;
+  kind: string;
+  extraKopecks: number;
+}): Promise<void> {
+  const db = await getDb();
+  const max = await db.get<{ m: number | null }>(
+    "SELECT MAX(sort_order) AS m FROM product_variants WHERE product_id = ?",
+    [input.productId],
+  );
+  await db.run(
+    "INSERT INTO product_variants (id, product_id, label, kind, extra, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+    [uid(), input.productId, input.label.slice(0, 40), input.kind, input.extraKopecks, Number(max?.m ?? 0) + 1],
+  );
+}
+
+/** Вариант удаляется только вместе с позициями корзины: иначе ссылка станет битой. */
+export async function deleteVariant(productId: string, variantId: string): Promise<boolean> {
+  const db = await getDb();
+  const existing = await db.get<{ id: string }>(
+    "SELECT id FROM product_variants WHERE id = ? AND product_id = ?",
+    [variantId, productId],
+  );
+  if (!existing) return false;
+  await db.run("DELETE FROM cart_items WHERE variant_id = ?", [variantId]);
+  await db.run("DELETE FROM product_variants WHERE id = ?", [variantId]);
+  return true;
+}
+
+export async function listSpecsForAdmin(productId: string): Promise<
+  { group: string; name: string; value: string; unit: string }[]
+> {
+  const db = await getDb();
+  const rows = await db.all<{ group_name: string; name: string; value: string; unit: string }>(
+    `SELECT group_name, name, value, unit FROM product_specs
+     WHERE product_id = ? AND group_name <> 'cross-sell' ORDER BY sort_order ASC`,
+    [productId],
+  );
+  return rows.map((r) => ({ group: r.group_name, name: r.name, value: r.value, unit: r.unit ?? "" }));
+}
+
+export async function upsertSpec(input: {
+  productId: string;
+  group: string;
+  name: string;
+  value: string;
+  unit: string;
+  numeric: number | null;
+}): Promise<void> {
+  const db = await getDb();
+  const existing = await db.get<{ product_id: string }>(
+    "SELECT product_id FROM product_specs WHERE product_id = ? AND group_name = ? AND name = ?",
+    [input.productId, input.group, input.name],
+  );
+  if (existing) {
+    await db.run(
+      "UPDATE product_specs SET value = ?, unit = ?, numeric = ? WHERE product_id = ? AND group_name = ? AND name = ?",
+      [input.value, input.unit, input.numeric, input.productId, input.group, input.name],
+    );
+    return;
+  }
+  const max = await db.get<{ m: number | null }>(
+    "SELECT MAX(sort_order) AS m FROM product_specs WHERE product_id = ?",
+    [input.productId],
+  );
+  await db.run(
+    `INSERT INTO product_specs (product_id, group_name, name, value, unit, numeric, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [input.productId, input.group, input.name, input.value, input.unit, input.numeric, Number(max?.m ?? 0) + 1],
+  );
+}
+
+export async function deleteSpec(productId: string, name: string): Promise<boolean> {
+  const db = await getDb();
+  const existing = await db.get<{ name: string }>(
+    "SELECT name FROM product_specs WHERE product_id = ? AND name = ? AND group_name <> 'cross-sell'",
+    [productId, name],
+  );
+  if (!existing) return false;
+  await db.run("DELETE FROM product_specs WHERE product_id = ? AND name = ? AND group_name <> 'cross-sell'", [
+    productId,
+    name,
+  ]);
+  return true;
+}
+
+/** Второй и следующие кадры галереи: первый — это photo_url товара. */
+export async function addProductMedia(input: {
+  productId: string;
+  url: string;
+  kind: "image" | "video";
+}): Promise<void> {
+  const db = await getDb();
+  const max = await db.get<{ m: number | null }>(
+    "SELECT MAX(sort_order) AS m FROM product_media WHERE product_id = ?",
+    [input.productId],
+  );
+  await db.run("INSERT INTO product_media (id, product_id, kind, url, sort_order) VALUES (?, ?, ?, ?, ?)", [
+    uid(),
+    input.productId,
+    input.kind,
+    input.url,
+    Number(max?.m ?? 0) + 1,
+  ]);
+}
+
+export async function countProductMedia(productId: string): Promise<number> {
+  const db = await getDb();
+  const row = await db.get<{ c: number | string }>(
+    "SELECT COUNT(*) AS c FROM product_media WHERE product_id = ?",
+    [productId],
+  );
+  return Number(row?.c ?? 0);
+}
+
+export async function deleteProduct(productId: string): Promise<boolean> {
+  const db = await getDb();
+  const existing = await db.get<{ id: string }>("SELECT id FROM products WHERE id = ?", [productId]);
+  if (!existing) return false;
+  // Дочерние записи уходят каскадом в PG; в SQLite внешние ключи не всегда
+  // включены, поэтому чистим те таблицы, где строка без товара бессмысленна.
+  for (const table of ["cart_items", "favorites", "product_variants", "product_specs", "product_media"]) {
+    await db.run(`DELETE FROM ${table} WHERE product_id = ?`, [productId]);
+  }
+  await db.run("DELETE FROM products WHERE id = ?", [productId]);
+  return true;
 }
 
 export async function listCategoriesAdmin(): Promise<(Category & { productCount: number })[]> {
@@ -312,7 +518,15 @@ export async function getProductById(id: string): Promise<Product | null> {
 
 export async function updateProduct(
   id: string,
-  patch: { title?: string; priceKopecks?: number; photoUrl?: string; isActive?: boolean },
+  patch: {
+    title?: string;
+    priceKopecks?: number;
+    photoUrl?: string;
+    isActive?: boolean;
+    brand?: string;
+    description?: string;
+    categoryId?: string;
+  },
 ): Promise<Product | null> {
   const db = await getDb();
   const current = await getProduct(id);
@@ -322,14 +536,16 @@ export async function updateProduct(
     price: patch.priceKopecks ?? current.price,
     photoUrl: patch.photoUrl ?? current.photoUrl,
     isActive: patch.isActive ?? current.isActive,
+    brand: patch.brand ?? null,
+    description: patch.description ?? null,
+    categoryId: patch.categoryId ?? null,
   };
-  await db.run("UPDATE products SET title = ?, price = ?, photo_url = ?, is_active = ? WHERE id = ?", [
-    next.title,
-    next.price,
-    next.photoUrl,
-    next.isActive,
-    id,
-  ]);
+  await db.run(
+    `UPDATE products SET title = ?, price = ?, photo_url = ?, is_active = ?,
+       brand = COALESCE(?, brand), description = COALESCE(?, description), category_id = COALESCE(?, category_id)
+     WHERE id = ?`,
+    [next.title, next.price, next.photoUrl, next.isActive, next.brand, next.description, next.categoryId, id],
+  );
   return getProduct(id);
 }
 

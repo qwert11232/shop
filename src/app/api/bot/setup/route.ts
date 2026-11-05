@@ -16,10 +16,13 @@ export const dynamic = "force-dynamic";
  */
 
 const COMMANDS = [
-  { command: "start", description: "Панель: заявки и товары" },
-  { command: "orders", description: "Заявки со статусами" },
-  { command: "products", description: "Товары: цена, фото, публикация" },
-  { command: "id", description: "Мой Telegram ID" },
+  { command: "start", description: "Панель магазина" },
+  { command: "new", description: "Добавить товар" },
+  { command: "products", description: "Товары: цена, фото, варианты" },
+  { command: "orders", description: "Заказы и доставка" },
+  { command: "customers", description: "Покупатели и бонусы" },
+  { command: "stats", description: "Сводка магазина" },
+  { command: "find", description: "Найти товар" },
   { command: "help", description: "Справка" },
 ];
 

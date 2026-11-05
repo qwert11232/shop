@@ -107,8 +107,83 @@ function bonusId(): string {
   return `be-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * Начисление/списание бонусов владельцем вручную (бот → «Начислить бонусы»).
+ * Знак определяет операцию: плюс — награда, минус — списание.
+ */
+export async function grantBonus(input: {
+  tgUserId: string;
+  amount: number;
+  reason: string;
+}): Promise<{ ok: boolean; balance?: number }> {
+  const db = await getDb();
+  // Уже существующему профилю начисляем всегда; новый создаём только под начисление,
+  // но не под «списать у незнакомого ID» — такую опечатку владельцу нужно видеть.
+  const existing = await db.get<CustomerRow>("SELECT * FROM customers WHERE tg_user_id = ?", [input.tgUserId]);
+  if (!existing) {
+    if (Math.round(input.amount) < 0) return { ok: false };
+    await ensureCustomerRow(input.tgUserId);
+  }
+  const amount = Math.round(input.amount);
+  if (amount === 0) return { ok: false };
+  // В минус баланс не уводим: списать можно только то, что есть.
+  if (amount < 0 && Number(existing?.bonus_balance ?? 0) + amount < 0) return { ok: false };
+  await addBonus(input.tgUserId, amount, input.reason.slice(0, 80) || "Начисление владельцем");
+  const after = await db.get<CustomerRow>("SELECT * FROM customers WHERE tg_user_id = ?", [input.tgUserId]);
+  return { ok: true, balance: Number(after?.bonus_balance ?? 0) };
+}
+
+export type CustomerSummary = Customer & { ordersCount: number; lastOrderAt: string | null };
+
+/** Покупатели для бота: сначала те, кто заказывал недавно. */
+export async function listCustomers(limit = 20): Promise<CustomerSummary[]> {
+  const db = await getDb();
+  const rows = await db.all<
+    CustomerRow & { orders_count: number | string | null; last_order_at: string | null }
+  >(
+    `SELECT c.*,
+            (SELECT COUNT(*) FROM orders o WHERE o.tg_user_id = c.tg_user_id) AS orders_count,
+            (SELECT MAX(o.created_at) FROM orders o WHERE o.tg_user_id = c.tg_user_id) AS last_order_at
+     FROM customers c
+     ORDER BY last_order_at DESC NULLS LAST, c.created_at DESC
+     LIMIT ?`,
+    [limit],
+  );
+  return rows.map((r) => ({
+    ...toCustomer(r),
+    ordersCount: Number(r.orders_count ?? 0),
+    lastOrderAt: r.last_order_at ? String(r.last_order_at) : null,
+  }));
+}
+
+export async function getCustomer(tgUserId: string): Promise<Customer | null> {
+  const db = await getDb();
+  const row = await db.get<CustomerRow>("SELECT * FROM customers WHERE tg_user_id = ?", [tgUserId]);
+  return row ? toCustomer(row) : null;
+}
+
+/**
+ * Профиль «на месте»: бонусы и заказы пишутся по tg_user_id, и если строки нет,
+ * начисление молча уходило в никуда (кешбэк за заказ терялся, пока клиент
+ * не открывал кабинет). Поэтому запись создаётся лениво прямо перед начислением.
+ */
+async function ensureCustomerRow(tgUserId: string): Promise<void> {
+  const db = await getDb();
+  const existing = await db.get<{ tg_user_id: string }>("SELECT tg_user_id FROM customers WHERE tg_user_id = ?", [
+    tgUserId,
+  ]);
+  if (existing) return;
+  await db.run(
+    `INSERT INTO customers (tg_user_id, first_name, username, phone, bonus_balance, referral_code, created_at)
+     VALUES (?, '', '', '', 0, ?, ?)`,
+    [tgUserId, referralCodeFor(tgUserId), Date.now()],
+  );
+}
+
 async function addBonus(tgUserId: string, amount: number, reason: string, orderId?: string): Promise<void> {
   const db = await getDb();
+  // Профиля может не быть: заказ оформляют и до первого открытия кабинета.
+  await ensureCustomerRow(tgUserId);
   await db.run(
     "INSERT INTO bonus_events (id, tg_user_id, amount, reason, order_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     [bonusId(), tgUserId, amount, reason, orderId ?? null, Date.now()],
@@ -478,13 +553,45 @@ export async function setDeliveryStatus(
   trackNumber?: string,
 ): Promise<boolean> {
   const db = await getDb();
-  const existing = await db.get<{ id: string }>("SELECT id FROM orders WHERE id = ?", [orderId]);
+  const existing = await db.get<{
+    id: string;
+    tg_user_id: string | null;
+    bonus_used: number | string | null;
+    bonus_earned: number | string | null;
+    delivery_status: string | null;
+  }>("SELECT id, tg_user_id, bonus_used, bonus_earned, delivery_status FROM orders WHERE id = ?", [orderId]);
   if (!existing) return false;
+
+  // Отмена — единственный переход, который двигает бонусы: клиент не получил
+  // товар, поэтому списанное возвращаем, а начисленный кешбэк снимаем.
+  // Повторная отмена (или отмена уже отменённого) бонусы не трогает.
+  if (status === "cancelled" && existing.delivery_status !== "cancelled" && existing.tg_user_id) {
+    const used = Number(existing.bonus_used ?? 0);
+    const earned = Number(existing.bonus_earned ?? 0);
+    if (used > 0) await addBonus(existing.tg_user_id, used, "Возврат бонусов за отменённый заказ", orderId);
+    if (earned > 0) {
+      const customer = await db.get<CustomerRow>("SELECT * FROM customers WHERE tg_user_id = ?", [
+        existing.tg_user_id,
+      ]);
+      // Снимаем не больше остатка: кешбэк мог быть уже потрачен.
+      const take = Math.min(earned, Number(customer?.bonus_balance ?? 0));
+      if (take > 0) await addBonus(existing.tg_user_id, -take, "Отмена начисления за заказ", orderId);
+    }
+  }
 
   await db.run(
     "UPDATE orders SET delivery_status = ?, track_number = COALESCE(?, track_number) WHERE id = ?",
     [status, trackNumber ?? null, orderId],
   );
+  if (status === "cancelled") {
+    // В CRM-статусах заявки отмена — это `cancelled`, иначе владелец увидит
+    // «в работе» у заказа, который отменён.
+    await db.run("UPDATE orders SET status = 'cancelled' WHERE id = ?", [orderId]);
+  } else if (existing.delivery_status === "cancelled") {
+    // Вернули в работу после отмены — заявка снова активна.
+    await db.run("UPDATE orders SET status = 'contacted' WHERE id = ?", [orderId]);
+  }
+
   await db.run("INSERT INTO order_events (id, order_id, status, actor, created_at) VALUES (?, ?, ?, ?, ?)", [
     `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     orderId,
@@ -493,6 +600,44 @@ export async function setDeliveryStatus(
     Date.now(),
   ]);
   return true;
+}
+
+/** Комментарий владельца к заказу — виден клиенту в кабинете (например, причина отмены). */
+export async function setOrderComment(orderId: string, comment: string): Promise<boolean> {
+  const db = await getDb();
+  const existing = await db.get<{ id: string }>("SELECT id FROM orders WHERE id = ?", [orderId]);
+  if (!existing) return false;
+  await db.run("UPDATE orders SET comment = ? WHERE id = ?", [comment.slice(0, 500), orderId]);
+  return true;
+}
+
+/** Сводка для панели: сколько всего заказов и сколько бонусов выдано. */
+export async function orderTotals(): Promise<{ orders: number; bonusIssued: number }> {
+  const db = await getDb();
+  const orders = await db.get<{ c: number | string }>("SELECT COUNT(*) AS c FROM orders");
+  const bonus = await db.get<{ s: number | string | null }>(
+    "SELECT SUM(amount) AS s FROM bonus_events WHERE amount > 0",
+  );
+  return { orders: Number(orders?.c ?? 0), bonusIssued: Number(bonus?.s ?? 0) };
+}
+
+/** Позиции одного заказа — для карточки в боте. */
+export async function listOrderItems(orderId: string): Promise<OrderItem[]> {
+  const db = await getDb();
+  const rows = await db.all<{
+    title: string;
+    variant: string;
+    price: number | string;
+    quantity: number | string;
+    product_id: string;
+  }>("SELECT title, variant, price, quantity, product_id FROM order_items WHERE order_id = ?", [orderId]);
+  return rows.map((r) => ({
+    title: r.title,
+    variant: r.variant ?? "",
+    price: Number(r.price),
+    quantity: Number(r.quantity),
+    productId: r.product_id,
+  }));
 }
 
 export async function listOrdersByDelivery(limit = 10): Promise<

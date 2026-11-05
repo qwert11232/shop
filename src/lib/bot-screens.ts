@@ -1,7 +1,7 @@
 import { isOrderStatus, orderStatusLabel, type AdminOrder, type OrderStatus, type Product } from "./repo";
 import { appUrl } from "./bot-access";
 import type { InlineButton, Keyboard } from "./bot-api";
-import { DELIVERY_STEPS, deliveryLabel, type DeliveryStatus } from "./shop";
+import { deliveryLabel } from "./shop";
 
 /**
  * Экраны админ-бота: чистая функция «данные → текст + клавиатура», без сети.
@@ -11,6 +11,8 @@ import { DELIVERY_STEPS, deliveryLabel, type DeliveryStatus } from "./shop";
  * экранируются, иначе название товара с «<» ломает сообщение.
  */
 export type Screen = { text: string; keyboard?: Keyboard; parseMode?: "HTML" };
+
+export { orderStatusLabel };
 
 export function esc(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -25,7 +27,7 @@ function openApp(): Keyboard {
 }
 
 /** Часы работы магазина в человеческом виде: «05.11, 14:32» по Москве. */
-function shortDate(raw: string): string {
+export function shortDate(raw: string): string {
   const iso = raw.includes("T") ? raw : `${raw.replace(" ", "T")}Z`;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return raw;
@@ -59,8 +61,12 @@ export function menuScreen(stats: {
       inline_keyboard: [
         [{ text: `Заявки (${stats.newOrders})`, callback_data: "orders:new" }],
         [
-          { text: "Все заявки", callback_data: "orders:all" },
           { text: "Товары", callback_data: "products:0" },
+          { text: "Добавить товар", callback_data: "add:new" },
+        ],
+        [
+          { text: "Покупатели", callback_data: "customers" },
+          { text: "Сводка", callback_data: "stats" },
         ],
         [{ text: "Открыть витрину", url: appUrl() }],
       ],
@@ -141,39 +147,9 @@ const STATUS_ACTION: Record<OrderStatus, string> = {
 };
 
 /**
- * Кнопки доставки: владелец ведёт заказ «Собирается» → «Передан в доставку» →
- * «Ждёт в ПВЗ» → «Получен». Следующий шаг всегда первым — искать не нужно.
+ * AppCompat заглушка: полная карточка заказа с доставкой и позициями живёт в
+ * `bot-screens-admin.ts`. Здесь остаётся короткая версия для списков.
  */
-export function nextDeliveryStep(current: string): DeliveryStatus | null {
-  if (current === "cancelled" || current === "done") return null;
-  const index = DELIVERY_STEPS.indexOf(current as DeliveryStatus);
-  if (index === -1) return "packing";
-  return DELIVERY_STEPS[Math.min(index + 1, DELIVERY_STEPS.length - 1)];
-}
-
-function deliveryButtons(orderId: string, current: string): InlineButton[][] {
-  const rows: InlineButton[][] = [];
-  const next = nextDeliveryStep(current);
-  if (next) {
-    rows.push([{ text: `Дальше: ${deliveryLabel(next)}`, callback_data: `delivery:${orderId}:${next}` }]);
-  }
-  const others: DeliveryStatus[] = (["packing", "shipped", "pickup", "done"] as DeliveryStatus[]).filter(
-    (step) => step !== next && step !== current,
-  );
-  const row: InlineButton[] = others.map((step) => ({
-    text: deliveryLabel(step),
-    callback_data: `delivery:${orderId}:${step}`,
-  }));
-  if (row.length) rows.push(row);
-  rows.push([
-    { text: "Трек-номер", callback_data: `track:${orderId}` },
-    current === "cancelled"
-      ? { text: "Вернуть в работу", callback_data: `delivery:${orderId}:packing` }
-      : { text: "Отменить", callback_data: `delivery:${orderId}:cancelled` },
-  ]);
-  return rows;
-}
-
 export function orderCardScreen(order: AdminOrder): Screen {
   const who = order.firstName ? esc(order.firstName) : "Гость";
   const handle = order.username ? ` @${esc(order.username)}` : "";
@@ -204,7 +180,6 @@ export function orderCardScreen(order: AdminOrder): Screen {
     text,
     keyboard: {
       inline_keyboard: [
-        ...deliveryButtons(order.id, delivery),
         actions.length ? actions : [],
         [
           { text: "‹ Заявки", callback_data: `orders:${order.status}` },
@@ -347,13 +322,24 @@ export function helpScreen(): Screen {
   const text = [
     "<b>Что умеет бот</b>",
     "",
-    "/start — панель: новые заявки, товары",
-    "/orders — заявки со статусами",
-    "/products — товары: цена, название, фото, публикация",
-    "/id — сообщить ваш Telegram ID",
+    "<b>Товары</b>",
+    "/new — добавить товар: название, цена, категория, бренд, описание, фото",
+    "/products — список товаров; в карточке: цена, бренд, описание, фото, галерея,",
+    "варианты (память, цвет), характеристики, скрыть или удалить",
+    "/find — поиск товара по названию или бренду",
+    "",
+    "<b>Заказы</b>",
+    "/orders — заказы по статусам; в карточке — статус доставки, трек-номер,",
+    "комментарий клиенту и кнопка «Написать»",
+    "",
+    "<b>Покупатели</b>",
+    "/customers — контакты, бонусный баланс, начисление и списание бонусов",
+    "/stats — сводка: заказы, выручка, средний чек, бонусы",
+    "",
+    "/id — мой Telegram ID",
     "/help — эта справка",
     "",
-    "<i>Заявку клиента видно в группе и здесь. Статус меняется кнопкой в карточке заявки.</i>",
+    "<i>Фото присылайте прямо в чат: бот сохранит его и поставит обложкой или кадром галереи.</i>",
   ].join("\n");
   return { text, keyboard: { inline_keyboard: [[{ text: "‹ Меню", callback_data: "menu" }]] } };
 }
