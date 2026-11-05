@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getDb, databaseUrl, isPostgresUrl } from "@/lib/db";
 import { storageDriver } from "@/lib/storage";
+import { ordersReceiverConfigured } from "@/lib/telegram";
+import { adminsConfigured } from "@/lib/bot-access";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +17,10 @@ export async function GET() {
     db: driver,
     autoSeed: process.env.AUTO_SEED ?? (process.env.VERCEL ? "1 (по умолчанию)" : "0"),
     storage: storageDriver() ?? "не настроено",
-    telegram: Boolean(process.env.BOT_TOKEN && process.env.GROUP_CHAT_ID),
+    // `telegram` — есть ли куда отправить заказ: группа или личка админов.
+    telegram: ordersReceiverConfigured(),
+    ordersTo: process.env.GROUP_CHAT_ID?.trim() ? "group" : adminsConfigured() ? "admin-dm" : "нет",
+    botAdmin: adminsConfigured(),
     owner: Boolean(process.env.OWNER_TELEGRAM_ID),
   };
 

@@ -1018,7 +1018,12 @@ async function syncGroupStatus(
   actor: string,
   delivery?: string,
 ): Promise<void> {
-  if (!order?.groupMessageId || !process.env.GROUP_CHAT_ID) return;
+  // Сообщение о заказе могло уйти в личку админа (когда группы ещё нет) —
+  // тогда правим его там же, chat_id совпадает с получателем заказа.
+  if (!order?.groupMessageId) return;
+  const target = process.env.GROUP_CHAT_ID?.trim();
+  const chatId = target && target !== "me" ? target : (process.env.ADMIN_TELEGRAM_IDS ?? "").split(",")[0]?.trim();
+  if (!chatId) return;
   const product = await getProductById(order.productId);
   if (!product) return;
   const base = buildOrderMessage({
@@ -1033,7 +1038,7 @@ async function syncGroupStatus(
     date: new Date(order.createdAt.includes("T") ? order.createdAt : `${order.createdAt.replace(" ", "T")}Z`),
   });
   await editMessage(
-    process.env.GROUP_CHAT_ID,
+    chatId,
     Number(order.groupMessageId),
     delivery ? withDeliveryLine(base, deliveryLabel(delivery), actor) : withStatusLine(base, status, actor),
   );

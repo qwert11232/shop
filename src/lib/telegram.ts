@@ -128,10 +128,48 @@ export function buildOrderMessage(opts: {
  * Отправка сообщения о заявке в группу. Если бот настроен, к сообщению
  * цепляются кнопки смены статуса — владелец меняет статус прямо в группе.
  */
+/**
+ * Куда отправлять заказ.
+ *
+ * `GROUP_CHAT_ID` — группа магазина, но пока её нет, заказ нельзя терять:
+ * поэтому при пустой переменной сообщение уходит администраторам в личку
+ * (`ADMIN_TELEGRAM_IDS`). Значение `me` тоже означает «в личку админам» —
+ * так проще на старте, чем заводить группу ради теста.
+ *
+ * Каждая проблема отдельная: если один админ заблокировал бота, остальные
+ * всё равно получат заказ.
+ */
+type OrderTarget = { chatId: string; admin: boolean };
+
+function orderRecipients(): OrderTarget {
+  const raw = process.env.GROUP_CHAT_ID?.trim() ?? "";
+  if (raw && raw !== "me") return { chatId: raw, admin: false };
+  const ids = (process.env.ADMIN_TELEGRAM_IDS ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  // OWNER_TELEGRAM_ID — историческая переменная, тоже считаем получателем.
+  const owner = process.env.OWNER_TELEGRAM_ID?.trim();
+  if (owner && !ids.includes(owner)) ids.push(owner);
+  return { chatId: ids[0] ?? "", admin: true };
+}
+
+/** Все админы — по одному сообщению, чтобы заказ увидел каждый. */
+function adminRecipients(): string[] {
+  const ids = (process.env.ADMIN_TELEGRAM_IDS ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const owner = process.env.OWNER_TELEGRAM_ID?.trim();
+  if (owner && !ids.includes(owner)) ids.push(owner);
+  return ids;
+}
+
 export async function sendGroupMessage(text: string, orderId?: string): Promise<string | null> {
   const token = process.env.BOT_TOKEN;
-  const chatId = process.env.GROUP_CHAT_ID;
-  if (!token || !chatId) return null;
+  if (!token) return null;
+  const { chatId, admin } = orderRecipients();
+  if (!chatId) return null;
   try {
     const replyMarkup = orderId ? orderKeyboard(orderId) : undefined;
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -144,13 +182,44 @@ export async function sendGroupMessage(text: string, orderId?: string): Promise<
       }),
     });
     const data = await res.json();
-    if (data?.ok && data?.result?.message_id) return String(data.result.message_id);
+    if (data?.ok && data?.result?.message_id) {
+      // В личку админам — дублируем остальным: заказ не должен зависеть от того,
+      // кто из владельцев первым открыл чат.
+      if (admin) {
+        for (const extra of adminRecipients().slice(1)) {
+          await sendPlain(extra, text, replyMarkup);
+        }
+      }
+      return String(data.result.message_id);
+    }
     console.error("[telegram] sendMessage failed:", JSON.stringify(data).slice(0, 300));
     return null;
   } catch (err) {
     console.error("[telegram] sendMessage error:", err);
     return null;
   }
+}
+
+/** Вспомогательная отправка без разбора ответа: сбой одного админа не валит заказ. */
+async function sendPlain(chatId: string, text: string, replyMarkup?: unknown): Promise<void> {
+  try {
+    await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      }),
+    });
+  } catch (err) {
+    console.error("[telegram] копия заказа не ушла:", err instanceof Error ? err.message : err);
+  }
+}
+
+/** Есть ли куда отправить заказ: группа, админы или владелец. */
+export function ordersReceiverConfigured(): boolean {
+  return Boolean(process.env.BOT_TOKEN && orderRecipients().chatId);
 }
 
 export function formatPrice(kopecks: number): string {

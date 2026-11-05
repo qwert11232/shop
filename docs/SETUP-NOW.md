@@ -1,0 +1,92 @@
+# Запуск бота: готовые значения
+
+Всё ниже — под текущий магазин. Секреты сгенерированы один раз: их можно заменить
+на свои, смысл от этого не меняется.
+
+> **Токен из переписки нужно перевыпустить.** Он уже побывал в открытом чате, а такой
+> токен даёт полный доступ к боту: читать переписку, рассылать сообщения от имени бота,
+> ставить вебхук. В @BotFather: `/mybots` → ваш бот → **API Token** → **Revoke current token**.
+> Новый впишите в `BOT_TOKEN` — всё остальное уже настроено под него.
+
+## 1. Переменные в Vercel
+
+Project → **Settings** → **Environment Variables** → добавить (Environment: Production и Preview):
+
+```
+BOT_TOKEN=НОВЫЙ_ТОКЕН_ИЗ_BOTFATHER
+BOT_WEBHOOK_SECRET=FSJR2_n_q3Sx1PWY2V4I1mJbqecH7X3x
+BOT_SETUP_TOKEN=x_fa3JPXf10vXPRg9F7ImaBB
+ADMIN_TELEGRAM_IDS=793536041
+WEBAPP_URL=https://shop-murex-gamma.vercel.app
+GROUP_CHAT_ID=me
+```
+
+`GROUP_CHAT_ID=me` — заказы приходят в личку админам (вам). Когда появится группа,
+впишите её ID (`-100…`) вместо `me`, ничего в коде менять не нужно.
+
+`ADMIN_TELEGRAM_USERNAMES` заполнять не обязательно: доступ уже открыт по ID.
+Но если хотите запасной вход — впишите свой username без `@`.
+
+`OWNER_TELEGRAM_ID` не нужен: `ADMIN_TELEGRAM_IDS` его полностью заменяет.
+
+## 2. Передеплой
+
+После добавления переменных: **Deployments** → последний → **Redeploy**
+(переменные подхватываются только новой сборкой).
+
+## 3. Поставить вебхук
+
+Открыть в браузере:
+
+```
+https://shop-murex-gamma.vercel.app/api/bot/setup?token=x_fa3JPXf10vXPRg9F7ImaBB
+```
+
+Ожидается `"ok": true` и шаги `getMe`, `setWebhook`, `setMyCommands`, `getWebhookInfo`.
+Если `ok: false` — в ответе будет причина по каждому шагу (обычно неверный токен
+или домен не тот).
+
+## 4. Проверить
+
+1. Открыть `https://shop-murex-gamma.vercel.app/api/health` — `ordersTo` должно быть `admin-dm`.
+2. Написать боту `/id` — он ответит вашим ID (это подтверждает, что вебхук живой).
+3. `/start` — панель: заявки, товары, добавить товар, покупатели, сводка.
+4. `/new` → название → цена → категория → «Создать товар».
+
+## 5. Фото товаров
+
+Без S3 фото из чата не загрузятся: на Vercel диск только для чтения.
+Бот честно скажет об этом, а не потеряет файл. Что задать:
+
+```
+S3_BUCKET=
+S3_ACCESS_KEY_ID=
+S3_SECRET_ACCESS_KEY=
+S3_ENDPOINT=            # для Cloudflare R2: https://<account-id>.r2.cloudflarestorage.com
+S3_REGION=auto
+S3_PUBLIC_BASE_URL=     # публичный домен бакета, например https://pub-xxxx.r2.dev
+```
+
+Пока S3 нет, товар можно добавить без фото и поставить его позже.
+
+## 6. База данных
+
+Нужен **PostgreSQL** (Neon). Важное различие, чтобы не путаться в названиях:
+
+- **Neon** — это PostgreSQL в облаке. Именно он нужен как `DATABASE_URL`.
+- **«Диск» / Volume** — блочное хранилище под файлы. В Vercel его нельзя подключить
+  к обычным функциям, а фото у нас идут в S3-совместимое хранилище (R2).
+
+Как подключить Neon:
+
+1. [neon.tech](https://neon.tech) → New Project → регион ближе к вам (Frankfurt).
+2. Connection string вида
+   `postgresql://user:password@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require`
+   → в `DATABASE_URL`.
+3. Redeploy. Схема (14 таблиц) накатится сама при первом запросе, каталог тоже
+   наполнится — отдельный SQL запускать не нужно.
+4. Проверить: `/api/health` → `"dialect": "postgres"`, `"counts": { "categories": 6, "products": 21 }`.
+
+Если у вас уже есть база Neon — пришлите строку подключения, я проверю совместимость
+и подскажу, нужно ли что-то поправить. Строку лучше присылать не целиком, а в виде
+`postgresql://user:ПАРОЛЬ@host/db?sslmode=require` без пароля — пароль вписывайте сами.

@@ -335,6 +335,24 @@ async function main() {
   });
   assert(stats.text.includes("Средний чек"), "сводка считает средний чек");
 
+  // ── Получатель заказов: группа или личка админов ──────────────────────────
+  const tg = await import("../src/lib/telegram");
+  delete process.env.BOT_TOKEN;
+  delete process.env.GROUP_CHAT_ID;
+  delete process.env.ADMIN_TELEGRAM_IDS;
+  delete process.env.OWNER_TELEGRAM_ID;
+  assert(!tg.ordersReceiverConfigured(), "без токена заказам некуда идти — это видно в /api/health");
+  process.env.BOT_TOKEN = "test-token";
+  assert(!tg.ordersReceiverConfigured(), "с токеном, но без получателя — тоже некуда");
+  process.env.ADMIN_TELEGRAM_IDS = "111, 222";
+  assert(tg.ordersReceiverConfigured(), "без группы заказ уходит админам в личку");
+  process.env.GROUP_CHAT_ID = "me";
+  assert(tg.ordersReceiverConfigured(), "значение me означает «в личку админам»");
+  process.env.GROUP_CHAT_ID = "-100123456";
+  assert(tg.ordersReceiverConfigured(), "с группой заказ уходит в группу");
+  delete process.env.GROUP_CHAT_ID;
+  delete process.env.BOT_TOKEN;
+
   rmSync(dir, { recursive: true, force: true });
   console.log("[check:bot] PASS — доступ, экраны, товары, варианты, характеристики, бонусы и заказы работают");
 }
