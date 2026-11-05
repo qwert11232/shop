@@ -43,61 +43,12 @@ export type SeedProduct = {
 };
 
 export const SEED_CATEGORIES: SeedCategory[] = [
+  { name: "Гаджеты" },
   { name: "Смартфоны" },
   { name: "Компьютеры" },
   { name: "Наушники" },
-  { name: "Гаджеты" },
   { name: "Игровые приставки" },
   { name: "Бытовая техника" },
-];
-
-/** Аксессуары: продаются как отдельные товары и предлагаются в блоке cross-sell. */
-const ACCESSORIES: SeedProduct[] = [
-  {
-    title: "Чехол силиконовый MagSafe",
-    category: "Гаджеты",
-    brand: "Apple",
-    priceRub: 4990,
-    photo: "/products/iphone-16-pro.webp",
-    desc: "Мягкий силикон, магнитное кольцо MagSafe, точные вырезы под камеру и порт.",
-    specs: [
-      { group: "Совместимость", name: "Модели", value: "iPhone 16 / 16 Pro" },
-      { group: "Материал", name: "Покрытие", value: "силикон, микрофибра" },
-    ],
-  },
-  {
-    title: "Кабель USB-C 2 м, 100 Вт",
-    category: "Гаджеты",
-    brand: "Технолаб",
-    priceRub: 1490,
-    photo: "/products/dualsense.webp",
-    desc: "Оплётка из нейлона, зарядка до 100 Вт и передача данных 480 Мбит/с.",
-    specs: [
-      { group: "Питание", name: "Мощность", value: "100", unit: "Вт", numeric: 100 },
-      { group: "Длина", name: "Длина", value: "2", unit: "м", numeric: 2 },
-    ],
-  },
-  {
-    title: "Карта памяти microSD 128 ГБ",
-    category: "Гаджеты",
-    brand: "SanDisk",
-    priceRub: 2190,
-    photo: "/products/xbox-series-x.webp",
-    desc: "Класс U3, V30: подходит для 4K-видео в камерах, дронах и приставках.",
-    specs: [
-      { group: "Объём", name: "Память", value: "128", unit: "ГБ", numeric: 128 },
-      { group: "Скорость", name: "Запись", value: "90", unit: "МБ/с", numeric: 90 },
-    ],
-  },
-  {
-    title: "Расширенная гарантия 24 месяца",
-    category: "Гаджеты",
-    brand: "Технолаб",
-    priceRub: 3990,
-    photo: "/products/ps5.webp",
-    desc: "Продлевает заводскую гарантию до двух лет: ремонт или замена без справок.",
-    specs: [{ group: "Условия", name: "Срок", value: "24", unit: "мес", numeric: 24 }],
-  },
 ];
 
 export const SEED_PRODUCTS: SeedProduct[] = [
@@ -126,7 +77,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
       { label: "256 ГБ", kind: "storage" },
       { label: "512 ГБ", kind: "storage", extraRub: 15000 },
     ],
-    crossSell: ["Чехол силиконовый MagSafe", "Кабель USB-C 2 м, 100 Вт", "Расширенная гарантия 24 месяца"],
+    crossSell: ["AirPods Pro 2"],
   },
   {
     title: "Samsung Galaxy S24 Ultra 512 ГБ",
@@ -149,7 +100,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
       { label: "256 ГБ", kind: "storage", extraRub: -7000 },
       { label: "512 ГБ", kind: "storage" },
     ],
-    crossSell: ["Кабель USB-C 2 м, 100 Вт", "Расширенная гарантия 24 месяца"],
+    crossSell: ["Геймпад DualSense для PS5"],
   },
   {
     title: "MacBook Pro 14″ M4",
@@ -172,7 +123,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
       { label: "Серебристый", kind: "color" },
       { label: "Космический чёрный", kind: "color" },
     ],
-    crossSell: ["Кабель USB-C 2 м, 100 Вт", "Расширенная гарантия 24 месяца"],
+    crossSell: ["Геймпад DualSense для PS5"],
   },
   {
     title: "iPad Pro 13″ M4",
@@ -193,7 +144,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
       { label: "Только Wi-Fi", kind: "config" },
       { label: "Wi-Fi + Cellular", kind: "config", extraRub: 12000 },
     ],
-    crossSell: ["Кабель USB-C 2 м, 100 Вт", "Расширенная гарантия 24 месяца"],
+    crossSell: ["Геймпад DualSense для PS5"],
   },
   {
     title: "AirPods Pro 2",
@@ -208,7 +159,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
       { group: "Корпус", name: "Защита", value: "IP54" },
     ],
     variants: [{ label: "Белый", kind: "color" }],
-    crossSell: ["Кабель USB-C 2 м, 100 Вт", "Расширенная гарантия 24 месяца"],
+    crossSell: ["Геймпад DualSense для PS5"],
   },
   {
     title: "AirPods Max",
@@ -276,7 +227,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
       { label: "С дисководом", kind: "config" },
       { label: "Цифровая версия", kind: "config", extraRub: -5000 },
     ],
-    crossSell: ["Геймпад DualSense для PS5", "Карта памяти microSD 128 ГБ", "Расширенная гарантия 24 месяца"],
+    crossSell: ["Геймпад DualSense для PS5", "Nintendo Switch OLED"],
   },
   {
     title: "Геймпад DualSense для PS5",
@@ -309,7 +260,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
       { label: "Белый", kind: "color" },
       { label: "Неон", kind: "color" },
     ],
-    crossSell: ["Карта памяти microSD 128 ГБ", "Расширенная гарантия 24 месяца"],
+    crossSell: ["Геймпад DualSense для PS5"],
   },
   {
     title: "Xbox Series X 1 ТБ",
@@ -395,5 +346,4 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     ],
     variants: [{ label: "Белый", kind: "color" }],
   },
-  ...ACCESSORIES,
 ];

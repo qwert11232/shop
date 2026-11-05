@@ -67,6 +67,9 @@ Thumbs.db
 # держим сжатые WebP — сборка на Vercel качает репозиторий целиком.
 public/products/originals/
 
+# Скачанные кандидаты фото (image_search) — рабочий материал, не часть проекта
+image-search/
+
 # Локальная БД и загруженные владельцем фото
 *.db
 *.db-journal

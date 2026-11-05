@@ -38,7 +38,9 @@ async function main() {
 
   // ── Каталог и фильтры ─────────────────────────────────────────────────────
   const products = await catalog.listVisibleProducts();
-  assert(products.length >= 20, `витрина наполнена (${products.length} товаров)`);
+  // 17 позиций: у каждой своё честное фото. Аксессуары с фотографиями других
+  // товаров удалены (см. seed-cleanup.ts) — количество здесь осознанное.
+  assert(products.length === 17, `витрина наполнена (${products.length} товаров)`);
   assert(products.every((p) => p.photoUrl.length > 0), "у каждого товара есть фото");
   assert(products.some((p) => p.brand), "у товаров есть бренд");
 

@@ -105,8 +105,9 @@ async function checkEmptyDatabaseBootstrap() {
   assert(true, "схема накатывается на пустую базу (DDL из db-setup.sql)");
 
   const seeded = await seedCatalog();
-  // Товары делятся на основную линейку (17) и аксессуары для блока «с этим покупают».
-  assert(seeded.products === 21 && seeded.categories === 6, "сид создал 6 категорий и 21 товар");
+  // 17 позиций с собственными фото: аксессуары, у которых фотографии были
+  // одолжены у других товаров, из каталога удалены.
+  assert(seeded.products === 17 && seeded.categories === 6, "сид создал 6 категорий и 17 товаров");
 
   const again = await seedCatalog();
   assert(again.products === 0 && again.categories === 0, "повторный сид идемпотентен — дублей нет");
@@ -114,7 +115,7 @@ async function checkEmptyDatabaseBootstrap() {
   const catalog = await listCatalog();
   assert(catalog.length === 6, "витрина видит 6 категорий");
   const total = catalog.reduce((n, c) => n + c.products.length, 0);
-  assert(total === 21, "витрина видит 21 товар");
+  assert(total === 17, "витрина видит 17 товаров");
   assert(catalog.every((c) => c.products.length > 0), "нет пустых категорий");
   assert(catalog.every((c) => c.products.every((p) => p.price > 0)), "у всех товаров цена в копейках");
   assert(catalog.every((c) => c.products.every((p) => p.photoUrl.startsWith("/products/"))), "у всех товаров фото из public/products");
@@ -196,10 +197,10 @@ async function checkPhotoMigration(): Promise<void> {
   __setDbForCheck(db);
 
   // Товар из прошлого деплоя: старое название из сида и путь к PNG.
-  await db.run("INSERT INTO categories (id, name, icon, sort_order) VALUES (?, ?, ?, ?)", ["c-old", "Аксессуары", "", 0]);
+  await db.run("INSERT INTO categories (id, name, icon, sort_order) VALUES (?, ?, ?, ?)", ["c-old", "Смартфоны", "", 0]);
   await db.run(
     "INSERT INTO products (id, title, description, price, photo_url, category_id) VALUES (?, ?, ?, ?, ?, ?)",
-    ["p-old", "Чехол силиконовый MagSafe", "старое описание", 349000, "/products/iphone-16-pro.jpg", "c-old"],
+    ["p-old", "iPhone 16 Pro 256 ГБ", "старое описание", 349000, "/products/iphone-16-pro.jpg", "c-old"],
   );
   await db.run("INSERT INTO product_media (id, product_id, kind, url, sort_order) VALUES (?, ?, ?, ?, ?)", [
     "m-old", "p-old", "image", "/products/iphone-16-pro.jpg", 1,
@@ -219,6 +220,15 @@ async function checkPhotoMigration(): Promise<void> {
   assert(Number(price?.price) === 349000, "цену, изменённую владельцем, сид не трогает");
   const desc = await db.get<{ description: string }>("SELECT description FROM products WHERE id = 'p-old'");
   assert(desc?.description === "старое описание", "описание владельца сид не переписывает");
+
+  // Аксессуар с фотографией чужого товара убирается с витрины при первом же сиде.
+  await db.run("INSERT INTO products (id, title, description, price, photo_url, category_id) VALUES (?, ?, ?, ?, ?, ?)", [
+    "p-bad", "Чехол силиконовый MagSafe", "мягкий силикон", 499000, "/products/iphone-16-pro.webp", "c-old",
+  ]);
+  const cleaned = await seedCatalog();
+  assert(cleaned.cleanup.deleted.includes("Чехол силиконовый MagSafe"), "демо-аксессуар с чужим фото удалён");
+  const gone = await db.get<{ id: string }>("SELECT id FROM products WHERE id = 'p-bad'");
+  assert(gone === undefined, "удалённый аксессуар не остаётся в базе");
 
   const stale = await db.all<{ id: string }>(
     "SELECT id FROM products WHERE photo_url LIKE '%.jpg' OR photo_url LIKE '%.png'",

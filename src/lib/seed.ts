@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { pruneLegacyDemoProducts, type SeedCleanupResult } from "./seed-cleanup";
 import { SEED_CATEGORIES, SEED_PRODUCTS, type SeedProduct } from "./catalog-seed";
 
 /**
@@ -28,6 +29,8 @@ export type SeedResult = {
   crossSell: number;
   /** Сколько уже существующих товаров удалось дозаполнить (бренд, детали). */
   backfilled: number;
+  /** Что убрано с витрины: удалено физически или скрыто из-за заказов. */
+  cleanup: SeedCleanupResult;
   driver: string;
 };
 
@@ -37,6 +40,9 @@ function uid(): string {
 
 export async function seedCatalog(): Promise<SeedResult> {
   const db = await getDb();
+  // Позиции, ушедшие из кода вместе с честными фото (см. seed-cleanup.ts).
+  // Делаем до сида: иначе они бы воскресли при первом же проходе.
+  const cleanup = await pruneLegacyDemoProducts();
   const catIds: Record<string, string> = {};
   let newCategories = 0;
 
@@ -154,6 +160,7 @@ export async function seedCatalog(): Promise<SeedResult> {
     specs: newSpecs,
     crossSell,
     backfilled,
+    cleanup,
     driver: db.dialect,
   };
 }
