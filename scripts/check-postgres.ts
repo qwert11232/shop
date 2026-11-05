@@ -71,7 +71,7 @@ async function main() {
   assert(Number(inserted?.m) === 0, "MAX() по пустой выборке не ломает приведение");
 
   await checkEmptyDatabaseBootstrap();
-  checkDatabaseUrlParsing();
+  await checkDatabaseUrlParsing();
 
   console.log("[check:pg] PASS — SQL-слой совместим с PostgreSQL");
 }
@@ -141,8 +141,8 @@ main().catch((err) => {
  * что разбор находит именно ту ошибку, которую видит человек: без хоста,
  * без пароля, с `&amp;` из чата и с паролем, где есть «@».
  */
-function checkDatabaseUrlParsing() {
-  const { analyzeDatabaseUrl, sanitizeConnectionString } = require("../src/lib/db-url") as typeof import("../src/lib/db-url");
+async function checkDatabaseUrlParsing(): Promise<void> {
+  const { analyzeDatabaseUrl, sanitizeConnectionString } = await import("../src/lib/db-url");
 
   const broken = analyzeDatabaseUrl(
     "postgresql://neondb_owner:////////////////////////////neondb?sslmode=require&amp;channel_binding=require",
