@@ -1,7 +1,7 @@
 import { Pool } from "pg";
 import type { Db, DbRow } from "./db";
 
-/** `?` → `$1…$n`; двойной апостроф и другие `?` внутри литералов запрещены соглашением. */
+/** Переводит плейсхолдеры `?` в `$1…$n`. Символ `?` внутри строковых литералов запрещён соглашением. */
 function toPgPlaceholders(sql: string): string {
   let i = 0;
   return sql.replace(/\?/g, () => `$${++i}`);

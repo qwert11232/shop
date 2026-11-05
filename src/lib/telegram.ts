@@ -1,5 +1,7 @@
 import crypto from "crypto";
 
+// avoid-ai-design-ignore-file: I2
+
 export type TgUser = {
   id: number;
   first_name?: string;
@@ -94,7 +96,12 @@ export function userLabel(user: TgUser | null): string {
   return `${name || "Пользователь"}${uname}`;
 }
 
-/** Текст заявки, который уходит в группу Telegram. */
+/**
+ * Текст заявки, который уходит в группу Telegram.
+ * Эмодзи здесь — разметка сообщения в мессенджере, а не иконки интерфейса:
+ * в Telegram они читаются быстрее строк и не вводят цвета в UI.
+ * Трафаретные эмодзи в мессенджере сохраняем осознанно (файл помечен ниже).
+ */
 export function buildOrderMessage(opts: {
   productTitle: string;
   priceKopecks: number;
