@@ -123,53 +123,89 @@ export async function seedCatalog(): Promise<SeedResult> {
 /**
  * Варианты, характеристики и галерея одного товара.
  *
- * Каждый блок досоздаётся только если его нет: сид зовут и для новых товаров,
- * и для тех, что уже лежат в базе с прошлого деплоя. Иначе повторный запуск
- * удвоил бы варианты, а пропуск оставил бы витрину без конфигураций.
+ * Сид — это синхронизация, а не только вставка: демо-каталог живёт в коде, и
+ * правка характеристики должна доезжать до базы, созданной прошлым деплоем.
+ * Поэтому варианты и спеки сопоставляются по стабильному ключу (`kind+label`,
+ * `group+name`) и обновляются на месте — id вариантов не меняются, а значит
+ * корзины клиентов не теряют ссылки. Галерея только досоздаётся: кадры,
+ * загруженные владельцем, сид не перезаписывает.
  */
-async function seedDetails(productId: string, p: SeedProduct): Promise<{ variants: number; specs: number }> {
+async function seedDetails(
+  productId: string,
+  p: SeedProduct,
+): Promise<{ variants: number; specs: number }> {
   const db = await getDb();
   let variants = 0;
   let specs = 0;
 
-  const count = async (table: string) => {
-    const row = await db.get<{ c: number | string }>(`SELECT COUNT(*) AS c FROM ${table} WHERE product_id = ?`, [
-      productId,
-    ]);
-    return Number(row?.c ?? 0);
-  };
-
-  const hasVariants = (await count("product_variants")) > 0;
-  const hasSpecs = (await count("product_specs")) > 0;
-  const hasMedia = (await count("product_media")) > 0;
-
-  for (const [index, v] of hasVariants ? [] : (p.variants ?? []).entries()) {
+  for (const [index, v] of (p.variants ?? []).entries()) {
+    const extra = Math.round((v.extraRub ?? 0) * 100);
+    const existing = await db.get<{ id: string; extra: number | string }>(
+      "SELECT id, extra FROM product_variants WHERE product_id = ? AND kind = ? AND label = ?",
+      [productId, v.kind, v.label],
+    );
+    if (existing) {
+      if (Number(existing.extra) !== extra) {
+        await db.run("UPDATE product_variants SET extra = ?, sort_order = ? WHERE id = ?", [
+          extra,
+          index,
+          existing.id,
+        ]);
+      }
+      continue;
+    }
     await db.run(
       `INSERT INTO product_variants (id, product_id, label, kind, extra, sort_order)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [uid(), productId, v.label, v.kind, Math.round((v.extraRub ?? 0) * 100), index],
+      [uid(), productId, v.label, v.kind, extra, index],
     );
     variants += 1;
   }
 
-  for (const [index, spec] of hasSpecs ? [] : (p.specs ?? []).entries()) {
+  for (const [index, spec] of (p.specs ?? []).entries()) {
+    const unit = spec.unit ?? "";
+    const numeric = spec.numeric ?? null;
+    const existing = await db.get<{ product_id: string; value: string; unit: string; numeric: number | null }>(
+      `SELECT product_id, value, unit, numeric FROM product_specs
+       WHERE product_id = ? AND group_name = ? AND name = ?`,
+      [productId, spec.group, spec.name],
+    );
+    if (existing) {
+      const same =
+        existing.value === spec.value &&
+        (existing.unit ?? "") === unit &&
+        (existing.numeric === null ? null : Number(existing.numeric)) === numeric;
+      if (!same) {
+        await db.run(
+          "UPDATE product_specs SET value = ?, unit = ?, numeric = ?, sort_order = ? WHERE product_id = ? AND group_name = ? AND name = ?",
+          [spec.value, unit, numeric, index, productId, spec.group, spec.name],
+        );
+      }
+      continue;
+    }
     await db.run(
       `INSERT INTO product_specs (product_id, group_name, name, value, unit, numeric, sort_order)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [productId, spec.group, spec.name, spec.value, spec.unit ?? "", spec.numeric ?? null, index],
+      [productId, spec.group, spec.name, spec.value, unit, numeric, index],
     );
     specs += 1;
   }
 
-  const gallery = hasMedia ? [] : [p.photo, ...(p.gallery ?? [])];
-  for (const [index, url] of gallery.entries()) {
-    await db.run("INSERT INTO product_media (id, product_id, kind, url, sort_order) VALUES (?, ?, ?, ?, ?)", [
-      uid(),
-      productId,
-      "image",
-      url,
-      index,
-    ]);
+  const mediaRow = await db.get<{ c: number | string }>(
+    "SELECT COUNT(*) AS c FROM product_media WHERE product_id = ?",
+    [productId],
+  );
+  if (Number(mediaRow?.c ?? 0) === 0) {
+    const gallery = [p.photo, ...(p.gallery ?? [])];
+    for (const [index, url] of gallery.entries()) {
+      await db.run("INSERT INTO product_media (id, product_id, kind, url, sort_order) VALUES (?, ?, ?, ?, ?)", [
+        uid(),
+        productId,
+        "image",
+        url,
+        index,
+      ]);
+    }
   }
 
   return { variants, specs };

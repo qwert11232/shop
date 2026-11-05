@@ -55,6 +55,14 @@ async function main() {
 
   const memoryFacet = facets.find((f) => f.name.toLowerCase().includes("память"));
   assert(Boolean(memoryFacet), "фильтр по памяти есть (ключевой параметр спецификации)");
+  assert(
+    facets.every((f) => f.unit.length > 0 || f.values.every((v) => !/^\d+$/.test(v.value))),
+    "числовые характеристики всегда показывают единицу измерения",
+  );
+  assert(
+    new Set(facets.map((f) => `${f.name}|${f.unit}`)).size === facets.length,
+    "одна характеристика в разных единицах не смешивается в один фильтр",
+  );
 
   const cheap = catalog.applyFilters(products, { sort: "price-asc" });
   assert(cheap[0].price <= cheap[cheap.length - 1].price, "сортировка по цене возрастает");
@@ -64,6 +72,14 @@ async function main() {
     band.length > 0 && band.every((p) => p.price >= 5000000 && p.price <= 10000000),
     "фильтр по диапазону цены работает",
   );
+
+  // Фильтр по характеристике — так, как его отправляет клиент: имя и значение отдельно.
+  const memoryValues = memoryFacet!.values.map((v) => v.value);
+  const byMemory = catalog.applyFilters(
+    products.map((p) => ({ ...p, specs: { [memoryFacet!.name]: memoryValues[0] } })),
+    { specs: { [memoryFacet!.name]: [memoryValues[0]] } },
+  );
+  assert(byMemory.length > 0, "фильтр по характеристике находит товары по значению");
 
   const brandFiltered = catalog.applyFilters(products, { brands: [brands[0].value] });
   assert(
@@ -110,6 +126,11 @@ async function main() {
     const withMedia = await catalog.getProductDetail(target.id);
     assert((withMedia?.gallery.length ?? 0) === 3, "в галерею попадают все кадры товара, включая добавленные");
     assert(withMedia?.gallery[1] === "/products/ps5.png", "кадры идут в заданном порядке");
+    assert(
+      withMedia?.media.some((m) => m.kind === "video") === true,
+      "видео в галерее помечено типом — карточка вставит плеер, а не картинку",
+    );
+    assert(withMedia?.media[1].kind === "image", "изображения остаются изображениями");
   }
 
   // ── Корзина ───────────────────────────────────────────────────────────────

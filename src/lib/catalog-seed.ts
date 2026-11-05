@@ -334,7 +334,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     desc: "Умный контроль температуры, двигатель V9, 1600 Вт. Три насадки в комплекте.",
     specs: [
       { group: "Питание", name: "Мощность", value: "1600", unit: "Вт", numeric: 1600 },
-      { group: "Комплект", name: "Насадки", value: "3" },
+      { group: "Комплект", name: "Насадки", value: "3", unit: "шт.", numeric: 3 },
     ],
     variants: [
       { label: "Медь", kind: "color" },
@@ -350,7 +350,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     desc: "Сушка и укладка без экстремального нагрева, насадки Coanda.",
     specs: [
       { group: "Питание", name: "Мощность", value: "1300", unit: "Вт", numeric: 1300 },
-      { group: "Комплект", name: "Насадки", value: "6" },
+      { group: "Комплект", name: "Насадки", value: "6", unit: "шт.", numeric: 6 },
     ],
     variants: [{ label: "Никель / медь", kind: "color" }],
   },
@@ -362,7 +362,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     photo: "/products/dyson-v15.png",
     desc: "Лазерная подсветка пыли, LCD-экран, до 60 минут работы.",
     specs: [
-      { group: "Питание", name: "Мощность всасывания", value: "240", unit: "Вт", numeric: 240 },
+      { group: "Питание", name: "Мощность всасывания", value: "240", unit: "аВт", numeric: 240 },
       { group: "Питание", name: "Автономность", value: "до 60", unit: "мин", numeric: 60 },
       { group: "Корпус", name: "Тип", value: "вертикальный" },
     ],
@@ -376,7 +376,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     photo: "/products/roborock-s7.jpg",
     desc: "Сухая и влажная уборка, лидар-навигация, управление из приложения.",
     specs: [
-      { group: "Питание", name: "Мощность всасывания", value: "2500", unit: "Па", numeric: 2500 },
+      { group: "Питание", name: "Разрежение", value: "2500", unit: "Па", numeric: 2500 },
       { group: "Уборка", name: "Влажная уборка", value: "есть" },
       { group: "Навигация", name: "Тип", value: "лидар" },
     ],

@@ -6,6 +6,7 @@ import { money, plural, shortDate } from "@/lib/format";
 
 type Variant = { id: string; label: string; kind: string; extra: number };
 type Spec = { group: string; name: string; value: string; unit: string; numeric: number | null };
+type Media = { kind: "image" | "video"; url: string };
 type Review = { id: string; author: string; rating: number; text: string; createdAt: number };
 type Product = {
   id: string;
@@ -17,6 +18,7 @@ type Product = {
   variants: Variant[];
   specs: Spec[];
   gallery: string[];
+  media: Media[];
   rating: number | null;
   reviewCount: number;
   reviews: Review[];
@@ -200,7 +202,11 @@ export default function ProductScreen(props: {
     );
   }
 
-  const gallery = product.gallery.length ? product.gallery : [product.photoUrl];
+  // Галерея: изображения листаются снапом, видео вставляется отдельным кадром
+  // с постером-картинкой — так же, как это делают маркетплейсы.
+  const gallery: Media[] = product.media?.length
+    ? product.media
+    : (product.gallery.length ? product.gallery : [product.photoUrl]).map((url) => ({ kind: "image" as const, url }));
 
   return (
     <div className="flex flex-col pb-4">
@@ -243,11 +249,24 @@ export default function ProductScreen(props: {
             setGalleryIndex(Math.round(e.currentTarget.scrollLeft / width));
           }}
         >
-          {gallery.map((url, index) => (
-            <div key={`${url}-${index}`} className="min-w-full snap-center aspect-square flex items-center justify-center">
-              <img src={url} alt={`${product.title} — фото ${index + 1}`} className="h-full w-full object-contain p-6" />
-            </div>
-          ))}
+          {gallery.map((item, index) =>
+            item.kind === "video" ? (
+              <div key={`${item.url}-${index}`} className="min-w-full snap-center aspect-square bg-ink">
+                <video
+                  src={item.url}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  aria-label={`${product.title} — видео`}
+                  className="h-full w-full object-contain"
+                />
+              </div>
+            ) : (
+              <div key={`${item.url}-${index}`} className="min-w-full snap-center aspect-square flex items-center justify-center">
+                <img src={item.url} alt={`${product.title} — фото ${index + 1}`} className="h-full w-full object-contain p-6" />
+              </div>
+            ),
+          )}
         </div>
         {gallery.length > 1 && (
           <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5">

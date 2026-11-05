@@ -32,6 +32,8 @@ export type ProductDetail = Product & {
   variants: ProductVariant[];
   specs: ProductSpec[];
   gallery: string[];
+  /** Кадры с типом: видео вставляется плеером, изображения — снапом. */
+  media: { kind: "image" | "video"; url: string }[];
   rating: number | null;
   reviewCount: number;
   reviews: Review[];
@@ -117,20 +119,24 @@ export async function listFacets(categoryId?: string): Promise<Facet[]> {
     "SELECT name, value, unit, product_id FROM product_specs WHERE group_name <> 'cross-sell'",
   );
 
-  const byName = new Map<string, { unit: string; values: Map<string, Set<string>> }>();
+  // Ключ фасета — «имя + единица»: «Мощность всасывания» в ваттах у пылесоса
+  // и в паскалях у робота — разные величины, складывать их в один фильтр нельзя.
+  const byName = new Map<string, { name: string; unit: string; values: Map<string, Set<string>> }>();
   for (const row of rows) {
     if (!ids.has(row.product_id)) continue;
-    const entry = byName.get(row.name) ?? { unit: row.unit, values: new Map<string, Set<string>>() };
+    const unit = (row.unit ?? "").trim();
+    const key = `${row.name}\u0000${unit}`;
+    const entry = byName.get(key) ?? { name: row.name, unit, values: new Map<string, Set<string>>() };
     const set = entry.values.get(row.value) ?? new Set<string>();
     set.add(row.product_id);
     entry.values.set(row.value, set);
-    byName.set(row.name, entry);
+    byName.set(key, entry);
   }
 
-  return [...byName.entries()]
-    .filter(([, entry]) => entry.values.size > 1 && entry.values.size <= 8)
-    .map(([name, entry]) => ({
-      name,
+  return [...byName.values()]
+    .filter((entry) => entry.values.size > 1 && entry.values.size <= 8)
+    .map((entry) => ({
+      name: entry.name,
       unit: entry.unit,
       values: [...entry.values.entries()]
         .map(([value, set]) => ({ value, count: set.size }))
@@ -202,8 +208,8 @@ export async function getProductDetail(id: string): Promise<ProductDetail | null
     [id],
   );
 
-  const mediaRows = await db.all<{ url: string }>(
-    "SELECT url FROM product_media WHERE product_id = ? ORDER BY sort_order ASC",
+  const mediaRows = await db.all<{ url: string; kind: string }>(
+    "SELECT url, kind FROM product_media WHERE product_id = ? ORDER BY sort_order ASC",
     [id],
   );
 
@@ -246,6 +252,9 @@ export async function getProductDetail(id: string): Promise<ProductDetail | null
       numeric: s.numeric === null ? null : Number(s.numeric),
     })),
     gallery: mediaRows.length ? mediaRows.map((m) => m.url) : [product.photoUrl],
+    media: mediaRows.length
+      ? mediaRows.map((m) => ({ kind: m.kind === "video" ? "video" : "image", url: m.url }))
+      : [{ kind: "image", url: product.photoUrl }],
     rating: rating === null ? null : Math.round(rating * 10) / 10,
     reviewCount: reviewRows.length,
     reviews: reviewRows.map((r) => ({

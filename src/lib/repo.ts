@@ -121,7 +121,7 @@ export async function listProductsAdmin(): Promise<(Product & { categoryName: st
   const rows = await db.all<ProductRow & { categoryname: string | null }>(
     `SELECT p.*, c.name AS categoryname FROM products p
      LEFT JOIN categories c ON c.id = p.category_id
-     ORDER BY p.created_at DESC`,
+     ORDER BY p.created_at DESC, p.title ASC`,
   );
   return rows.map((r) => ({ ...prod(r), categoryName: r.categoryname }));
 }

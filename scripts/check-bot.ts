@@ -66,9 +66,16 @@ async function main() {
   const catalog = await repo.listCatalog();
   assert(catalog.length === 6, "каталог наполнен (6 категорий)");
 
-  const product = catalog[0].products[0];
-  const productsScreen = screens.productsScreen(await repo.listProductsAdmin(), 0);
+  // Порядок в списке — «свежие сверху»; при одинаковом времени создания
+  // его добивает название, поэтому страница бота стабильна между запросами.
+  const adminList = await repo.listProductsAdmin();
+  const product = adminList[0];
+  const productsScreen = screens.productsScreen(adminList, 0);
   assert(productsScreen.text.includes(screens.esc(product.title)), "список товаров показывает товар");
+  assert(
+    screens.productsScreen(adminList, 0).text === productsScreen.text,
+    "порядок товаров в боте не меняется от запроса к запросу",
+  );
   const productCard = screens.productCardScreen(product);
   assert(productCard.text.includes("₽"), "карточка товара показывает цену");
 
