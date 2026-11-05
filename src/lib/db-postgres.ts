@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import type { Db, DbRow } from "./db";
+import { sanitizeConnectionString } from "./db-url";
 
 /** Переводит плейсхолдеры `?` в `$1…$n`. Символ `?` внутри строковых литералов запрещён соглашением. */
 function toPgPlaceholders(sql: string): string {
@@ -26,10 +27,13 @@ export function createPostgresDb(connectionString: string, client?: PgClient): D
   const pool: PgClient =
     client ??
     (() => {
+      // channel_binding из шаблона Neon node-postgres не поддерживает — вырезаем,
+      // остальные параметры (sslmode) оставляем.
+      const safeUrl = sanitizeConnectionString(connectionString);
       const real = new Pool({
-        connectionString,
+        connectionString: safeUrl,
         max: Number(process.env.PGPOOL_MAX || 5),
-        ssl: /sslmode=(require|verify-ca|verify-full)/.test(connectionString)
+        ssl: /sslmode=(require|verify-ca|verify-full)/.test(safeUrl)
           ? { rejectUnauthorized: false }
           : undefined,
       });

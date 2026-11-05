@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb, databaseUrl, isPostgresUrl } from "@/lib/db";
+import { analyzeDatabaseUrl, dbUrlHint } from "@/lib/db-url";
 import { storageDriver } from "@/lib/storage";
 import { ordersReceiverConfigured } from "@/lib/telegram";
 import { adminsConfigured } from "@/lib/bot-access";
@@ -13,8 +14,17 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const url = databaseUrl();
   const driver = isPostgresUrl(url) ? "postgres" : "sqlite";
+  // Диагностика строки подключения: без пароля, только хост и найденные проблемы.
+  const report = analyzeDatabaseUrl(url);
+  const dbCheck = {
+    host: report.host || null,
+    database: report.database || null,
+    problems: report.problems,
+    warnings: report.warnings,
+  };
   const checks: Record<string, unknown> = {
     db: driver,
+    databaseUrl: dbCheck,
     autoSeed: process.env.AUTO_SEED ?? (process.env.VERCEL ? "1 (по умолчанию)" : "0"),
     storage: storageDriver() ?? "не настроено",
     // `telegram` — есть ли куда отправить заказ: группа или личка админов.
@@ -41,6 +51,8 @@ export async function GET() {
         ok: false,
         dialect: driver,
         error: err instanceof Error ? err.message : "unknown",
+        // Подсказка только про строку подключения: прочие причины остаются в error.
+        hint: dbUrlHint(report) || undefined,
         checks,
       },
       { status: 500 },

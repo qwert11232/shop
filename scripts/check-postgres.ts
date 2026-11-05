@@ -71,6 +71,7 @@ async function main() {
   assert(Number(inserted?.m) === 0, "MAX() по пустой выборке не ломает приведение");
 
   await checkEmptyDatabaseBootstrap();
+  checkDatabaseUrlParsing();
 
   console.log("[check:pg] PASS — SQL-слой совместим с PostgreSQL");
 }
@@ -134,3 +135,44 @@ main().catch((err) => {
   console.error("[check:pg] ошибка:", err);
   process.exit(1);
 });
+
+/**
+ * Строка подключения — самая частая причина «на деплое пусто». Проверяем,
+ * что разбор находит именно ту ошибку, которую видит человек: без хоста,
+ * без пароля, с `&amp;` из чата и с паролем, где есть «@».
+ */
+function checkDatabaseUrlParsing() {
+  const { analyzeDatabaseUrl, sanitizeConnectionString } = require("../src/lib/db-url") as typeof import("../src/lib/db-url");
+
+  const broken = analyzeDatabaseUrl(
+    "postgresql://neondb_owner:////////////////////////////neondb?sslmode=require&amp;channel_binding=require",
+  );
+  assert(broken.dialect === "postgres", "диалект определяется по префиксу");
+  assert(broken.problems.length > 0, "неполная строка Neon распознаётся как ошибка, а не как рабочий конфиг");
+  assert(
+    broken.problems.some((p) => p.includes("хост")),
+    "в подсказке сказано про хост, а не «ENOTFOUND»",
+  );
+
+  const good = analyzeDatabaseUrl(
+    "postgresql://neondb_owner:npg_secret@ep-cool-1234.eu-central-1.aws.neon.tech/neondb?sslmode=require&amp;channel_binding=require",
+  );
+  assert(good.problems.length === 0, "полная строка Neon проходит без замечаний по существу");
+  assert(good.host.includes("neon.tech") && good.database === "neondb", "хост и база разобраны");
+  assert(good.hasPassword, "наличие пароля видно без раскрытия значения");
+  assert(!JSON.stringify(good).includes("npg_secret"), "пароль не попадает в отчёт для /api/health");
+
+  const noPassword = analyzeDatabaseUrl("postgresql://neondb_owner@ep-1.eu-central-1.aws.neon.tech/neondb");
+  assert(noPassword.problems.some((p) => p.includes("парол")), "отсутствие пароля объясняется словами");
+
+  const oneAt = analyzeDatabaseUrl("postgresql://u:p@ss@ep-1.aws.neon.tech/neondb?sslmode=require");
+  assert(oneAt.warnings.some((w) => w.includes("%40")), "пароль с «@» подсказывает про экранирование");
+
+  const sanitized = sanitizeConnectionString(
+    "postgresql://u:p@ep-1.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+  );
+  assert(!sanitized.includes("channel_binding"), "channel_binding из шаблона Neon вырезается для драйвера");
+  assert(sanitized.includes("sslmode=require"), "sslmode при этом сохраняется");
+
+  assert(analyzeDatabaseUrl("file:./dev.db").dialect === "sqlite", "SQLite-путь не считается ошибкой");
+}
