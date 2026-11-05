@@ -81,7 +81,6 @@ export default function Catalog() {
     <main className="mx-auto max-w-md min-h-dvh flex flex-col px-4 pb-8">
       {/* шапка */}
       <header className="sticky top-0 z-30 -mx-4 px-4 py-3 flex items-center gap-3 bg-[#07090c]/85 backdrop-blur-md border-b border-line">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/logo.png" alt="ТЕХНОЛАБ" className="h-9 w-9 rounded-lg" />
         <div className="flex-1 leading-tight">
           <div className="font-display font-bold text-sm tracking-wide">ТЕХНОЛАБ</div>
@@ -126,7 +125,6 @@ export default function Catalog() {
         {products.map((p) => (
           <button key={p.id} className="card text-left" onClick={() => setSelected(p)}>
             <div className="aspect-square bg-surface2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={p.photoUrl} alt={p.title} className="h-full w-full object-cover" loading="lazy" />
             </div>
             <div className="p-2.5">
@@ -150,7 +148,6 @@ export default function Catalog() {
           <div className="sheet-backdrop" onClick={closeModal} />
           <div className="sheet">
             <div className="relative">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={selected.photoUrl} alt={selected.title} className="h-56 w-full object-cover" />
               <button
                 onClick={closeModal}

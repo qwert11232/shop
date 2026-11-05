@@ -1,51 +1,51 @@
-import Database from "better-sqlite3";
-import path from "path";
-
 /**
- * Локальная БД — SQLite-файл (better-sqlite3, синхронный, без внешних бинарников).
- * На проде схема переносится в PostgreSQL — см. db-setup.sql в корне и docs/ARCHITECTURE.md.
+ * Слой доступа к БД: один интерфейс, два диалекта.
+ *
+ * Диалект выбирается по `DATABASE_URL`:
+ *   - `postgres://…` / `postgresql://…` → PostgreSQL (pg, продакшен);
+ *   - всё остальное (`file:./dev.db`) → SQLite-файл (better-sqlite3, локальная разработка).
+ *
+ * Запросы пишутся один раз с плейсхолдерами `?`; PG-адаптер переводит их в `$1…$n`.
+ * Ограничение: в тексте запросов не должно быть символа `?` вне плейсхолдера.
  */
-const dbFile = (process.env.DATABASE_URL || "file:./dev.db").replace(/^file:/, "");
-const db = new Database(path.resolve(process.cwd(), dbFile));
 
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+export type DbRow = Record<string, unknown>;
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS categories (
-  id         TEXT PRIMARY KEY,
-  name       TEXT NOT NULL,
-  icon       TEXT NOT NULL DEFAULT '📦',
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  is_active  INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+export interface Db {
+  readonly dialect: "sqlite" | "postgres";
+  all<T = DbRow>(sql: string, params?: unknown[]): Promise<T[]>;
+  get<T = DbRow>(sql: string, params?: unknown[]): Promise<T | undefined>;
+  run(sql: string, params?: unknown[]): Promise<void>;
+}
 
-CREATE TABLE IF NOT EXISTS products (
-  id          TEXT PRIMARY KEY,
-  title       TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  price       INTEGER NOT NULL,          -- копейки
-  photo_url   TEXT NOT NULL,
-  is_active   INTEGER NOT NULL DEFAULT 1,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  category_id TEXT NOT NULL REFERENCES categories(id)
-);
+export function databaseUrl(): string {
+  return process.env.DATABASE_URL || "file:./dev.db";
+}
 
-CREATE TABLE IF NOT EXISTS orders (
-  id                TEXT PRIMARY KEY,
-  status            TEXT NOT NULL DEFAULT 'new',
-  comment           TEXT NOT NULL DEFAULT '',
-  tg_user_id        TEXT,
-  first_name        TEXT,
-  username          TEXT,
-  group_message_id  TEXT,
-  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-  product_id        TEXT NOT NULL REFERENCES products(id)
-);
+export function isPostgresUrl(url: string): boolean {
+  return /^postgres(ql)?:\/\//i.test(url);
+}
 
-CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
-CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id);
-`);
+let instance: Db | null = null;
+let loading: Promise<Db> | null = null;
 
-export default db;
+/** Единственный экземпляр адаптера на процесс (пул соединений не пересоздаётся на каждый запрос). */
+export async function getDb(): Promise<Db> {
+  if (instance) return instance;
+  if (!loading) {
+    loading = createDb(databaseUrl()).then((db) => {
+      instance = db;
+      return db;
+    });
+  }
+  return loading;
+}
+
+async function createDb(url: string): Promise<Db> {
+  if (isPostgresUrl(url)) {
+    const { createPostgresDb } = await import("./db-postgres");
+    return createPostgresDb(url);
+  }
+  const { createSqliteDb } = await import("./db-sqlite");
+  return createSqliteDb(url.replace(/^file:/, ""));
+}

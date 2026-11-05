@@ -51,8 +51,8 @@ Telegram Mini App «витрина магазина техники». Владе
 
 1. `/admin` → `POST /api/admin/categories|products|upload` с заголовком `x-telegram-init-data`.
 2. Сервер сверяет `user.id === OWNER_TELEGRAM_ID` (после валидации HMAC).
-3. Фото загружается multipart-формой в `public/uploads/` — это работает только локально:
-   на Vercel ФС доступна лишь на чтение, нужен объектный стор (S3/R2/Vercel Blob).
+3. Фото загружается multipart-формой: в S3/R2/MinIO при заданном `S3_BUCKET`, иначе локально
+   в `public/uploads/`. На Vercel локальная запись недоступна — без S3 `/api/admin/upload` вернёт 501.
 
 ## Модель данных (SQLite локально — `src/lib/db.ts`; PostgreSQL прод — `db-setup.sql`)
 
@@ -71,7 +71,7 @@ Telegram Mini App «витрина магазина техники». Владе
 | POST | `/api/admin/products` | владелец | добавить товар `{title, priceRub, description, categoryId, photoUrl}` |
 | GET/POST | `/api/admin/categories` | владелец | список/создание категорий |
 | GET | `/api/admin/orders` | владелец | список заявок |
-| POST | `/api/admin/upload` | владелец | загрузка фото (multipart, ≤ 8 МБ, jpg/png/webp) |
+| POST | `/api/admin/upload` | владелец | загрузка фото (multipart, ≤ 8 МБ, jpg/png/webp) → S3 или `public/uploads/` |
 
 ## Переменные окружения (см. `.env.example`)
 
@@ -81,15 +81,20 @@ Telegram Mini App «витрина магазина техники». Владе
 
 - **Next.js 15 (App Router) + React 19 + TypeScript**
 - **Tailwind CSS v4** (дизайн-токены в `globals.css`, см. `docs/DESIGN.md`)
-- **БД:** dev — SQLite через `better-sqlite3`, prod — PostgreSQL по `db-setup.sql`; доступ через тонкий репозиторий `src/lib/repo.ts`
+- **БД:** диалект выбирается по `DATABASE_URL`: `file:` → SQLite (`better-sqlite3`), `postgres://` → PostgreSQL (`pg`).
+  Единый интерфейс — `src/lib/db.ts` (`all/get/run`, плейсхолдеры `?`), доступ только через `src/lib/repo.ts`.
+  Схема PG — `db-setup.sql`; проверка SQL на настоящем PG — `npm run check:pg` (pglite в WASM).
+- **Фото:** `src/lib/storage.ts` — S3-совместимое хранилище (`S3_*`) или локальный `public/uploads/`;
+  на Vercel без S3 загрузка отвечает 501 вместо тихой потери файла.
+- **Лимиты заявок:** таблица `order_limits` в БД — общая для всех инстансов и переживает рестарт.
 - Шрифты: Unbounded + Manrope (кириллица) через `@fontsource/*`
 - Без сторонних UI-библиотек; нативный Telegram WebApp SDK подключается скриптом
 
 ## Деплой
 
-1. БД: создать проект на Neon/Supabase → вставить `db-setup.sql` в SQL-редактор. Слой данных
-   (`src/lib/db.ts`) пока только SQLite: для прода нужен PG-адаптер с тем же API, что у
-   `better-sqlite3` (`prepare/get/all/run`), иначе приложение стартует на файле.
+1. БД: создать проект на Neon/Supabase → вставить `db-setup.sql` в SQL-редактор →
+   `DATABASE_URL=postgresql://…?sslmode=require`. Слой данных переключится на PG автоматически.
+   Локально оставьте `file:./dev.db` — схема SQLite создаётся сама.
 2. Приложение: Vercel (или любой Node-хостинг) → `npm run build && npm start`.
 3. В `.env` продакшена: `BOT_TOKEN`, `GROUP_CHAT_ID`, `OWNER_TELEGRAM_ID`, `WEBAPP_URL=https://<домен>`, `ALLOW_DEV_NO_AUTH` — **выключить**.
 4. В @BotFather: `/setmenubutton` или кнопка WebApp в группе → URL = `WEBAPP_URL`.
@@ -103,4 +108,6 @@ npm install
 
 npm run db:seed             # категории + демо-товары
 npm run dev                 # http://localhost:3000
+
+npm run check               # lint + typecheck + проверки хранилища и SQL для PG
 ```

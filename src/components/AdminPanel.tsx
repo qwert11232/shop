@@ -132,7 +132,6 @@ export default function AdminPanel() {
   return (
     <main className="mx-auto max-w-md min-h-dvh px-4 pb-10">
       <header className="sticky top-0 z-30 -mx-4 px-4 py-3 flex items-center gap-3 bg-[#07090c]/85 backdrop-blur-md border-b border-line">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/logo.png" alt="ТЕХНОЛАБ" className="h-9 w-9 rounded-lg" />
         <div className="flex-1 leading-tight">
           <div className="font-display font-bold text-sm">ТЕХНОЛАБ · владелец</div>
@@ -199,7 +198,6 @@ export default function AdminPanel() {
                 <input type="file" accept="image/*" onChange={onFile} className="text-sm text-muted" disabled={uploading} />
                 {photoUrl && (
                   <div className="flex items-center gap-2 mt-2">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={photoUrl} alt="превью" className="h-12 w-12 rounded-lg object-cover border border-line" />
                     <span className="text-xs text-muted truncate">{photoUrl}</span>
                   </div>
@@ -214,7 +212,6 @@ export default function AdminPanel() {
           <div className="flex flex-col gap-2">
             {products.map((p) => (
               <div key={p.id} className="card p-3 flex items-center gap-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.photoUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-bold truncate">{p.title}</div>
@@ -257,7 +254,6 @@ export default function AdminPanel() {
           {orders.length === 0 && <p className="text-muted text-sm text-center py-8">Заявок пока нет</p>}
           {orders.map((o) => (
             <div key={o.id} className="card p-3 flex items-start gap-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={o.productPhoto} alt="" className="h-12 w-12 rounded-lg object-cover" />
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-bold truncate">{o.productTitle}</div>

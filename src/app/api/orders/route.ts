@@ -1,40 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createOrder, getProduct } from "@/lib/repo";
+import { createOrder, getProduct, reserveOrderSlot } from "@/lib/repo";
 import { buildOrderMessage, formatPrice, resolveUser, sendGroupMessage, userLabel } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 
-/** Ограничения на заявки: от повторов, флуда и слишком частых сообщений в группу. */
-const SAME_PRODUCT_WINDOW_MS = 60_000;
+/** Окно антифлуда: одна заявка на товар и не больше N заявок за период. */
+const ORDER_WINDOW_MS = 60_000;
 const MAX_ORDERS_PER_WINDOW = 5;
-const RATE_WINDOW_MS = 60_000;
-/** key (tg id или ip) → отметки времени отправленных заявок. Живёт в памяти процесса. */
-const recentOrders = new Map<string, number[]>();
-/** key (клиент + товар) → время последней заявки, чтобы двойной тап не давал две заявки. */
-const recentByProduct = new Map<string, number>();
 
 function clientIp(req: NextRequest): string {
   return (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "unknown";
-}
-
-function duplicateOrder(key: string, now: number): boolean {
-  const last = recentByProduct.get(key);
-  if (last !== undefined && now - last < SAME_PRODUCT_WINDOW_MS) return true;
-  recentByProduct.set(key, now);
-  if (recentByProduct.size > 5000) recentByProduct.clear();
-  return false;
-}
-
-function rateLimited(key: string, now: number): boolean {
-  const stamps = (recentOrders.get(key) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
-  if (stamps.length >= MAX_ORDERS_PER_WINDOW) {
-    recentOrders.set(key, stamps);
-    return true;
-  }
-  stamps.push(now);
-  recentOrders.set(key, stamps);
-  if (recentOrders.size > 5000) recentOrders.clear();
-  return false;
 }
 
 /**
@@ -53,7 +28,7 @@ export async function POST(req: NextRequest) {
   const productId = body.productId?.trim();
   if (!productId) return NextResponse.json({ error: "Не выбран товар" }, { status: 400 });
 
-  const product = getProduct(productId);
+  const product = await getProduct(productId);
   if (!product || !product.isActive) {
     return NextResponse.json({ error: "Товар не найден" }, { status: 404 });
   }
@@ -65,17 +40,20 @@ export async function POST(req: NextRequest) {
   const label = userLabel(user);
   const comment = (body.comment || "").slice(0, 500);
 
-  const now = Date.now();
   const clientKey = user ? `tg:${user.id}` : `ip:${clientIp(req)}`;
-
-  if (duplicateOrder(`${clientKey}|${product.id}`, now)) {
-    return NextResponse.json(
-      { error: "Заявка на этот товар уже отправлена. Подождите минуту." },
-      { status: 429 },
-    );
-  }
-  if (rateLimited(clientKey, now)) {
-    return NextResponse.json({ error: "Слишком много заявок. Попробуйте через минуту." }, { status: 429 });
+  const gate = await reserveOrderSlot({
+    clientKey,
+    productId: product.id,
+    now: Date.now(),
+    windowMs: ORDER_WINDOW_MS,
+    maxPerWindow: MAX_ORDERS_PER_WINDOW,
+  });
+  if (!gate.ok) {
+    const message =
+      gate.reason === "duplicate"
+        ? "Заявка на этот товар уже отправлена. Подождите минуту."
+        : "Слишком много заявок. Попробуйте через минуту.";
+    return NextResponse.json({ error: message, retryInSec: gate.retryInSec }, { status: 429 });
   }
 
   const message = buildOrderMessage({
@@ -88,7 +66,7 @@ export async function POST(req: NextRequest) {
 
   const groupMessageId = await sendGroupMessage(message);
 
-  const order = createOrder({
+  const order = await createOrder({
     productId: product.id,
     comment,
     tgUserId: user ? String(user.id) : null,

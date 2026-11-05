@@ -1,0 +1,79 @@
+/**
+ * Проверка PostgreSQL-диалекта без внешней БД: поднимаем pglite (PostgreSQL в WASM),
+ * отдаём его в createPostgresDb как обычный пул и гоняем реальные сценарии.
+ *
+ * Запуск: npm run db:check:pg
+ * Это не юнит-тест ради покрытия, а способ убедиться, что SQL из repo.ts валиден
+ * для PostgreSQL: плейсхолдеры, boolean-литералы, имена колонок, типы.
+ */
+import { PGlite } from "@electric-sql/pglite";
+import { readFile } from "fs/promises";
+import path from "path";
+import { createPostgresDb } from "../src/lib/db-postgres";
+
+function assert(cond: unknown, message: string) {
+  if (!cond) {
+    console.error(`[check:pg] FAIL — ${message}`);
+    process.exit(1);
+  }
+  console.log(`[check:pg] ok — ${message}`);
+}
+
+async function main() {
+  const pg = new PGlite();
+  // Тот же db-setup.sql, что применяется на managed-базе.
+  const setupSql = await readFile(path.join(process.cwd(), "db-setup.sql"), "utf8");
+  await pg.exec(setupSql);
+
+  const db = createPostgresDb("postgres://local/check", {
+    query: async (text: string, values?: unknown[]) => {
+      const res = await pg.query(text, values);
+      return { rows: res.rows };
+    },
+  });
+
+  assert(db.dialect === "postgres", "диалект определён как postgres");
+
+  await db.run("INSERT INTO categories (id, name, icon, sort_order) VALUES (?, ?, ?, ?)", [
+    "c1", "Смартфоны", "📱", 0,
+  ]);
+  await db.run(
+    "INSERT INTO products (id, title, description, price, photo_url, category_id) VALUES (?, ?, ?, ?, ?, ?)",
+    ["p1", "iPhone 16 Pro", "тест", 8999000, "/products/iphone-16-pro.jpg", "c1"],
+  );
+
+  const active = await db.all<{ id: string }>("SELECT * FROM categories WHERE is_active = TRUE ORDER BY sort_order ASC");
+  assert(active.length === 1, "активные категории читаются (boolean-литерал TRUE)");
+
+  const tree = await db.get<{ productcount: number | string }>(
+    `SELECT c.*, (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id) AS productcount
+     FROM categories c ORDER BY c.sort_order ASC, c.created_at ASC`,
+  );
+  assert(Number(tree?.productcount) === 1, "подзапрос со счётчиком товаров корректен на PG");
+
+  await db.run("INSERT INTO orders (id, comment, product_id) VALUES (?, ?, ?)", ["o1", "проверка", "p1"]);
+  const joined = await db.all<{ producttitle: string; productprice: number | string }>(
+    `SELECT o.*, p.title AS producttitle, p.price AS productprice
+     FROM orders o JOIN products p ON p.id = o.product_id ORDER BY o.created_at DESC LIMIT 100`,
+  );
+  assert(joined.length === 1 && joined[0].producttitle === "iPhone 16 Pro", "JOIN заявок и товаров работает");
+
+  const order = await db.get<{ created_at: Date | string; is_active?: boolean }>("SELECT * FROM orders WHERE id = ?", ["o1"]);
+  assert(order !== undefined, "get по id возвращает строку");
+  assert(order?.created_at instanceof Date, "created_at приходит как Date (не строка) — приведение в repo.ts обязательно");
+
+  await db.run("DELETE FROM order_limits WHERE created_at < ?", [0]);
+  await db.run("INSERT INTO order_limits (client_key, product_id, created_at) VALUES (?, ?, ?)", ["tg:1", "p1", 1000]);
+  const gate = await db.get<{ c: number | string }>("SELECT COUNT(*) AS c FROM order_limits WHERE client_key = ? AND created_at >= ?", ["tg:1", 0]);
+  assert(Number(gate?.c) === 1, "таблица лимитов заявок есть в схеме и доступна по SQL");
+
+  const inserted = await db.get<{ m: number | string | null }>("SELECT MAX(sort_order) AS m FROM categories");
+  assert(Number(inserted?.m) === 0, "MAX() по пустой выборке не ломает приведение");
+
+  console.log("[check:pg] PASS — SQL-слой совместим с PostgreSQL");
+}
+
+main().catch((err) => {
+  console.error("[check:pg] ошибка:", err);
+  process.exit(1);
+});

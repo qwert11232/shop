@@ -11,7 +11,7 @@ function user(req: NextRequest) {
 /** Список всех товаров — только для владельца. */
 export async function GET(req: NextRequest) {
   if (!isOwner(user(req))) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  return NextResponse.json({ products: listProductsAdmin() });
+  return NextResponse.json({ products: await listProductsAdmin() });
 }
 
 /**
@@ -38,11 +38,11 @@ export async function POST(req: NextRequest) {
   if (!Number.isFinite(priceRub) || priceRub <= 0 || priceRub > 100_000_000) {
     return NextResponse.json({ error: "Укажите корректную цену в рублях" }, { status: 400 });
   }
-  if (!categoryExists(categoryId)) {
+  if (!(await categoryExists(categoryId))) {
     return NextResponse.json({ error: "Категория не найдена" }, { status: 400 });
   }
 
-  const product = createProduct({
+  const product = await createProduct({
     title,
     description,
     priceKopecks: Math.round(priceRub * 100),

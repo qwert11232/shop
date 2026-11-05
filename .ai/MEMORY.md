@@ -35,12 +35,12 @@
 | Проект / продукт | **ТЕХНОЛАБ** — Telegram Mini App «витрина» магазина техники; заявки уходят в группу |
 | Ветка по умолчанию | `main` |
 | Рабочая ветка агента | `arena/5adc7378-shop` (код ТЕХНОЛАБ перенесён сюда из `arena/1171e345-shop`) |
-| Стек | TypeScript, Next.js 15 (App Router), React 19, Tailwind v4, SQLite via better-sqlite3 (dev) / PostgreSQL prod, Vercel |
+| Стек | TypeScript, Next.js 15 (App Router), React 19, Tailwind v4; БД по `DATABASE_URL`: SQLite (better-sqlite3) / PostgreSQL (pg); фото — S3-совместимое хранилище или `public/uploads/`; Vercel |
 | Точка входа | `src/app/page.tsx` (витрина), `src/app/admin/page.tsx` (панель владельца) |
 | Команда запуска | `npm run dev` (после `npm run db:seed`) |
-| Команды проверок | `npm run typecheck`, `npm run build`, `npm run db:seed` (идемпотентен) |
-| Переменные окружения | `.env.example`: DATABASE_URL, BOT_TOKEN, GROUP_CHAT_ID, OWNER_TELEGRAM_ID, WEBAPP_URL, ALLOW_DEV_NO_AUTH, DEV_NO_AUTH_HOSTS |
-| Статус проверок | PASS 2026-11-05: seed 6/17, typecheck, build, dev + curl (см. Шаг 2) |
+| Команды проверок | `npm run check` (lint + typecheck + check:storage + check:pg), `npm run build`, `npm run db:seed` |
+| Переменные окружения | `.env.example`: DATABASE_URL, PGPOOL_MAX, S3_BUCKET/S3_REGION/S3_ENDPOINT/S3_PUBLIC_BASE_URL/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY, BOT_TOKEN, GROUP_CHAT_ID, OWNER_TELEGRAM_ID, WEBAPP_URL, ALLOW_DEV_NO_AUTH, DEV_NO_AUTH_HOSTS |
+| Статус проверок | PASS 2026-11-05: check (4 прогона), build, seed 6/17, dev + curl; см. Шаг 3 |
 
 ### Что работает сейчас
 
@@ -49,23 +49,27 @@
 - Админка `/admin`: публикация категорий/товаров, загрузка фото, лента заявок (только OWNER_TELEGRAM_ID).
 - Аутентификация: HMAC-SHA256 initData через `timingSafeEqual`, обязательный `auth_date` (24 ч).
 - dev-режим `ALLOW_DEV_NO_AUTH` — только `NODE_ENV !== production` и хост localhost/`*.e2b.app`/`DEV_NO_AUTH_HOSTS`.
-- Заявки: антидубль «клиент+товар» 60 с и лимит 5 заявок/мин на клиента (429).
+- Заявки: антидубль «клиент+товар» 60 с и лимит 5 заявок/мин на клиента (429), состояние в таблице `order_limits`.
+- БД: `src/lib/db.ts` — адаптер с `all/get/run`; `db-sqlite.ts` (схема сама) и `db-postgres.ts` (`?`→`$n`, пул).
+- Фото: `src/lib/storage.ts` — S3 (`S3_BUCKET`) или `public/uploads/`; на Vercel без S3 → 501.
+- Линт: `eslint.config.mjs` (next/core-web-vitals + typescript), `npm run lint` чистый, `eslint-disable` в коде нет.
 
 ### Что сломано / не проверено
 
 - Реальная отправка в группу не проверена в боевом Telegram (нет токена в песочнице) — проверяется по `docs/TELEGRAM-SETUP.md`.
-- Продакшен-БД (PostgreSQL) не развёрнута; локально SQLite.
-- Прод-PostgreSQL не реализован в коде: `src/lib/db.ts` жёстко на `better-sqlite3`, PG-драйвера и переключателя нет (документация обещает PG).
-- Загрузка фото `/api/admin/upload` пишет в `public/uploads/` — на Vercel ФС только для чтения; нужен объектный стор (S3/R2/Vercel Blob).
-- Контроль доступа и лимиты заявок живут в памяти процесса — при нескольких инстансах лимиты не общие.
-- Линтера в проекте нет (`typecheck` + `build`); в компонентах остались `eslint-disable`-комментарии.
+- Боевой PostgreSQL не развёрнут (нет внешней БД в песочнице): SQL проверен на pglite, реальный Neon/Supabase — нет.
+- Загрузка в реальный S3/R2 не проверена: проверен драйвер с подменённым клиентом (`npm run check:storage`).
+- Локальный запуск требует `npm_config_nodedir=/usr/local npm rebuild better-sqlite3` (нет сети к nodejs.org).
+- `/api/admin/upload` принимает файл по расширению, содержимое не проверяется (magic bytes).
+- Очистка `order_limits` — DELETE при каждой заявке; на больших объёмах нужен индекс по `created_at` (есть составной).
 
 ### Backlog (не входит в текущую задачу)
 
 - Онлайн-оплата, корзина, статусы заявки (new→contacted→done) с кнопками в группе.
 - Уведомление клиенту в ЛС ботом после обработки заявки.
 - `/admin` проверяет владельца только на API: сама страница отдаётся всем (данные всё равно за 403).
-- Объектное хранилище для фото; `logo.png` 854 КБ — сжать перед релизом; фото товаров сторонние.
+- `logo.png` 854 КБ — сжать перед релизом; фото товаров сторонние, заменить на свои.
+- Проверка magic bytes на загрузке; удаление осиротевших объектов в S3.
 
 ---
 
@@ -83,6 +87,13 @@
 > - Риски: [что может сломаться и как это заметить]
 > - Проверка: [какие команды прогнали и с каким результатом]
 > ```
+
+### Шаг 3: Прод-инфраструктура — PG, S3, лимиты в БД, линтер (2026-11-05)
+- Контекст: после Шага 2 в бэклоге остались четыре дефекта, мешавшие деплою: код умел только SQLite, фото писались на read-only ФС Vercel, антифлуд жил в памяти процесса, линтера не было.
+- Решение: `src/lib/db.ts` — адаптер (`all/get/run`, плейсхолдеры `?`) с двумя динамически загружаемыми диалектами: `db-sqlite.ts` и `db-postgres.ts` (`?`→`$n`, пул `pg`, SSL по `sslmode`). `repo.ts` стал асинхронным, boolean-литерал и имена колонок приведены к нижнему регистру PG. Лимиты вынесены в таблицу `order_limits` (`reserveOrderSlot`). `src/lib/storage.ts` — драйвер S3 (`@aws-sdk/client-s3`, ленивый импорт) или локальный; на Vercel без S3 ответ 501 вместо потери файла. Добавлены `eslint.config.mjs` (next/core-web-vitals+typescript, `no-img-element` выключен осознанно — URL фото динамические), скрипты `lint/check/check:pg/check:storage`.
+- Альтернативы: Prisma/Drizzle — отклонено (нет сети к binaries.prisma.sh; Drizzle тянет генерацию миграций, а схема одна); `next/image` вместо `<img>` — отклонено: домены фото задаются в рантайме (S3/CDN), remotePatterns статичны; Redis для лимитов — отклонено: лишняя инфраструктура, БД уже есть; Vercel Blob — отклонено: привязка к платформе, S3-совместимость покрывает R2/MinIO/AWS.
+- Риски: адаптер требует, чтобы `?` в SQL был только плейсхолдером (соглашение зафиксировано в `db.ts`); PG-путь проверен на pglite, не на боевом PG; локальная сборка `better-sqlite3` требует `nodedir`.
+- Проверка: `npm run check` (lint 0 ошибок, typecheck, 14 утверждений storage, 8 утверждений PG на pglite), `npm run build`, `npm run db:seed` (6/17, идемпотентно), dev + curl: заявка 200, дубль 429, лимит 5/мин, upload local 200 / txt 400, чужие хосты 403, поля API совпадают с типами фронта.
 
 ### Шаг 2: Перенос кода в рабочую ветку + фиксы блокеров (2026-11-05)
 - Контекст: ТЕХНОЛАБ жил в `arena/1171e345-shop`, `main` оставался пустым каркасом; рабочая ветка сессии — `arena/5adc7378-shop`. Нужен рабочий код здесь без чужой истории.
@@ -113,9 +124,9 @@
 
 ## 4. NEXT STEPS — что делать следующему агенту
 
-1. Включить `ALLOW_DEV_NO_AUTH` вручную при локальном запуске: без него `/admin` вернёт 403 (в `.env` по умолчанию не задано).
-2. Решить прод-БД: адаптер PostgreSQL в `src/lib/db.ts` либо явно оставить SQLite+volume — сейчас документация опережает код.
-3. Заменить запись фото в `public/uploads/` на объектное хранилище перед деплоем на Vercel.
+1. Включить `ALLOW_DEV_NO_AUTH` вручную при локальном запуске: без него `/admin` вернёт 403.
+2. Прогнать `check:pg` против реального Neon/Supabase и `check:storage` против настоящего бакета — в песочнице только эмуляция.
+3. Добавить проверку magic bytes на загрузке и удаление осиротевших объектов в S3 (Backlog).
 
 ---
 
@@ -125,3 +136,4 @@
 | --- | --- | --- |
 | 2026-11-04 | Инициализация каркаса `.ai/`, запуск ТЕХНОЛАБ (ветка `arena/1171e345-shop`) | агент |
 | 2026-11-05 | Перенос кода в `arena/5adc7378-shop`, фиксы блокеров, обновление памяти и `RULES.md` | агент |
+| 2026-11-05 | PG-адаптер, S3-хранилище, лимиты в БД, ESLint; память и правила обновлены | агент |

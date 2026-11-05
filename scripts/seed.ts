@@ -1,4 +1,4 @@
-import db from "../src/lib/db";
+import { getDb } from "../src/lib/db";
 
 /**
  * Сид каталога ТЕХНОЛАБ: категории + демо-товары с фото из public/products.
@@ -37,27 +37,37 @@ function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-const catIds: Record<string, string> = {};
-const findCat = db.prepare("SELECT id FROM categories WHERE name = ?");
-const insCat = db.prepare("INSERT INTO categories (id, name, icon, sort_order) VALUES (?, ?, ?, ?)");
-categories.forEach((c, i) => {
-  const existing = findCat.get(c.name) as { id: string } | undefined;
-  if (existing) {
-    catIds[c.name] = existing.id;
-  } else {
-    insCat.run(uid(), c.name, c.icon, i);
-    catIds[c.name] = (findCat.get(c.name) as { id: string }).id;
-  }
-});
+async function main() {
+  const db = await getDb();
+  const catIds: Record<string, string> = {};
 
-const findProd = db.prepare("SELECT id FROM products WHERE title = ?");
-const insProd = db.prepare(
-  "INSERT INTO products (id, title, description, price, photo_url, category_id) VALUES (?, ?, ?, ?, ?, ?)"
-);
-for (const p of products) {
-  if (findProd.get(p.title)) continue;
-  insProd.run(uid(), p.title, p.desc, Math.round(p.priceRub * 100), p.photo, catIds[p.category]);
+  for (const [i, c] of categories.entries()) {
+    const existing = await db.get<{ id: string }>("SELECT id FROM categories WHERE name = ?", [c.name]);
+    if (existing) {
+      catIds[c.name] = existing.id;
+      continue;
+    }
+    const id = uid();
+    await db.run("INSERT INTO categories (id, name, icon, sort_order) VALUES (?, ?, ?, ?)", [
+      id, c.name, c.icon, i,
+    ]);
+    catIds[c.name] = id;
+  }
+
+  for (const p of products) {
+    const exists = await db.get<{ id: string }>("SELECT id FROM products WHERE title = ?", [p.title]);
+    if (exists) continue;
+    await db.run(
+      "INSERT INTO products (id, title, description, price, photo_url, category_id) VALUES (?, ?, ?, ?, ?, ?)",
+      [uid(), p.title, p.desc, Math.round(p.priceRub * 100), p.photo, catIds[p.category]],
+    );
+  }
+
+  const count = await db.get<{ c: number | string }>("SELECT COUNT(*) AS c FROM products");
+  console.log(`[seed] готово (${db.dialect}): категорий=${categories.length}, товаров=${Number(count?.c ?? 0)}`);
 }
 
-const count = db.prepare("SELECT COUNT(*) AS c FROM products").get() as { c: number };
-console.log(`[seed] готово: категорий=${categories.length}, товаров=${count.c}`);
+main().catch((err) => {
+  console.error("[seed] ошибка:", err);
+  process.exit(1);
+});
