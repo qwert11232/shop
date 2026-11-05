@@ -2,6 +2,20 @@ import { getDb } from "./db";
 import { SEED_CATEGORIES, SEED_PRODUCTS, type SeedProduct } from "./catalog-seed";
 
 /**
+ * Старые файлы фото из первых версий сида: `iphone-16-pro.jpg` → `iphone-16-pro.webp`.
+ *
+ * Зачем: сборка сжимает фото в WebP и удаляет исходные PNG/JPEG. В базе прошлого
+ * деплоя остались старые пути — без переписывания витрина показала бы битые
+ * картинки. Меняем только свои файлы из `products/`, загруженные владельцем URL
+ * (S3, R2, внешние ссылки) не трогаем.
+ */
+export function migratePhotoUrl(url: string): string {
+  const match = /^\/products\/([^/]+)\.(?:png|jpe?g)$/i.exec(url.trim());
+  if (!match) return url;
+  return `/products/${match[1]}.webp`;
+}
+
+/**
  * Наполнение каталога стартовыми данными. Идемпотентно: повторный вызов
  * не создаёт дублей (сверка по названию категории и товара).
  * Возвращает, что реально добавлено — это попадает в лог, а не в угадывание.
@@ -64,6 +78,20 @@ export async function seedCatalog(): Promise<SeedResult> {
         await db.run("UPDATE products SET brand = ? WHERE id = ?", [p.brand, exists.id]);
         touched = true;
       }
+      // Путь к фото — единственное поле, которое сид правит у существующего товара:
+      // файлы переехали в WebP, и старый путь иначе стал бы битой картинкой.
+      const photoRow = await db.get<{ photo_url: string }>("SELECT photo_url FROM products WHERE id = ?", [
+        exists.id,
+      ]);
+      const migrated = migratePhotoUrl(photoRow?.photo_url ?? "");
+      if (migrated !== (photoRow?.photo_url ?? "")) {
+        await db.run("UPDATE products SET photo_url = ? WHERE id = ?", [migrated, exists.id]);
+        await db.run("UPDATE product_media SET url = ? WHERE url = ? AND kind = 'image'", [
+          migrated,
+          photoRow?.photo_url,
+        ]);
+        touched = true;
+      }
       const added = await seedDetails(exists.id, p);
       if (added.variants > 0 || added.specs > 0) {
         newVariants += added.variants;
@@ -106,6 +134,16 @@ export async function seedCatalog(): Promise<SeedResult> {
         [id, "cross-sell", `cross:${target}`, title, "", null, index],
       );
       crossSell += 1;
+    }
+  }
+
+  // Галерея: у существующих товаров тоже доводим пути до WebP.
+  for (const row of await db.all<{ id: string; url: string }>(
+    "SELECT id, url FROM product_media WHERE kind = 'image'",
+  )) {
+    const migrated = migratePhotoUrl(row.url);
+    if (migrated !== row.url) {
+      await db.run("UPDATE product_media SET url = ? WHERE id = ?", [migrated, row.id]);
     }
   }
 

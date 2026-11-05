@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 3000",
-    "build": "next build",
+    "build": "tsx scripts/optimize-images.ts && next build",
+    "optimize:images": "tsx scripts/optimize-images.ts",
     "start": "next start -H 0.0.0.0 -p 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

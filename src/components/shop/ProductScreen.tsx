@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiHeaders, haptic } from "@/lib/telegram-webapp";
 import { money, plural, shortDate } from "@/lib/format";
+import ProductImage from "@/components/ui/ProductImage";
 
 type Variant = { id: string; label: string; kind: string; extra: number };
 type Spec = { group: string; name: string; value: string; unit: string; numeric: number | null };
@@ -263,7 +264,7 @@ export default function ProductScreen(props: {
               </div>
             ) : (
               <div key={`${item.url}-${index}`} className="min-w-full snap-center aspect-square flex items-center justify-center">
-                <img src={item.url} alt={`${product.title} — фото ${index + 1}`} className="h-full w-full object-contain p-6" />
+                <ProductImage src={item.url} alt={`${product.title} — фото ${index + 1}`} priority={index === galleryIndex} className="h-full w-full object-contain p-6" wrapperClassName="h-full w-full" />
               </div>
             ),
           )}
@@ -471,7 +472,7 @@ export default function ProductScreen(props: {
                   className="min-w-[132px] w-[132px] border border-rule rounded-[12px] text-left"
                 >
                   <div className="aspect-square bg-[#f6f6f6] rounded-t-[12px]">
-                    <img src={item.photoUrl} alt={item.title} className="h-full w-full object-contain p-2" loading="lazy" />
+                    <ProductImage src={item.photoUrl} alt={item.title} className="h-full w-full object-contain p-2" />
                   </div>
                   <div className="p-2">
                     <div className="text-[12px] font-medium line-clamp-2 min-h-[2.4em]">{item.title}</div>

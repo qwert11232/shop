@@ -58,7 +58,7 @@ const ACCESSORIES: SeedProduct[] = [
     category: "Гаджеты",
     brand: "Apple",
     priceRub: 4990,
-    photo: "/products/iphone-16-pro.jpg",
+    photo: "/products/iphone-16-pro.webp",
     desc: "Мягкий силикон, магнитное кольцо MagSafe, точные вырезы под камеру и порт.",
     specs: [
       { group: "Совместимость", name: "Модели", value: "iPhone 16 / 16 Pro" },
@@ -70,7 +70,7 @@ const ACCESSORIES: SeedProduct[] = [
     category: "Гаджеты",
     brand: "Технолаб",
     priceRub: 1490,
-    photo: "/products/dualsense.jpg",
+    photo: "/products/dualsense.webp",
     desc: "Оплётка из нейлона, зарядка до 100 Вт и передача данных 480 Мбит/с.",
     specs: [
       { group: "Питание", name: "Мощность", value: "100", unit: "Вт", numeric: 100 },
@@ -82,7 +82,7 @@ const ACCESSORIES: SeedProduct[] = [
     category: "Гаджеты",
     brand: "SanDisk",
     priceRub: 2190,
-    photo: "/products/xbox-series-x.jpg",
+    photo: "/products/xbox-series-x.webp",
     desc: "Класс U3, V30: подходит для 4K-видео в камерах, дронах и приставках.",
     specs: [
       { group: "Объём", name: "Память", value: "128", unit: "ГБ", numeric: 128 },
@@ -94,7 +94,7 @@ const ACCESSORIES: SeedProduct[] = [
     category: "Гаджеты",
     brand: "Технолаб",
     priceRub: 3990,
-    photo: "/products/ps5.png",
+    photo: "/products/ps5.webp",
     desc: "Продлевает заводскую гарантию до двух лет: ремонт или замена без справок.",
     specs: [{ group: "Условия", name: "Срок", value: "24", unit: "мес", numeric: 24 }],
   },
@@ -106,7 +106,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Смартфоны",
     brand: "Apple",
     priceRub: 89990,
-    photo: "/products/iphone-16-pro.jpg",
+    photo: "/products/iphone-16-pro.webp",
     desc: "Титановый корпус, чип A18 Pro, тройная камера 48 Мп, Ceramic Shield.",
     specs: [
       { group: "Экран", name: "Диагональ", value: "6,3", unit: "″", numeric: 6.3 },
@@ -133,7 +133,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Смартфоны",
     brand: "Samsung",
     priceRub: 94990,
-    photo: "/products/galaxy-s24-ultra.jpg",
+    photo: "/products/galaxy-s24-ultra.webp",
     desc: "AMOLED 6,8″ 120 Гц, Snapdragon 8 Gen 3, S Pen в комплекте, камера 200 Мп.",
     specs: [
       { group: "Экран", name: "Диагональ", value: "6,8", unit: "″", numeric: 6.8 },
@@ -156,7 +156,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Компьютеры",
     brand: "Apple",
     priceRub: 189990,
-    photo: "/products/macbook-pro-14.jpg",
+    photo: "/products/macbook-pro-14.webp",
     desc: "Чип Apple M4, 16 ГБ памяти, Liquid Retina XDR 120 Гц, до 18 часов работы.",
     specs: [
       { group: "Экран", name: "Диагональ", value: "14,2", unit: "″", numeric: 14.2 },
@@ -179,7 +179,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Компьютеры",
     brand: "Apple",
     priceRub: 129990,
-    photo: "/products/ipad-pro-m4.png",
+    photo: "/products/ipad-pro-m4.webp",
     desc: "OLED-дисплей Tandem, чип M4, поддержка Apple Pencil Pro.",
     specs: [
       { group: "Экран", name: "Диагональ", value: "13", unit: "″", numeric: 13 },
@@ -200,7 +200,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Наушники",
     brand: "Apple",
     priceRub: 24990,
-    photo: "/products/airpods-pro-2.jpg",
+    photo: "/products/airpods-pro-2.webp",
     desc: "Активное шумоподавление, чип H2, до 30 часов с кейсом, защита IP54.",
     specs: [
       { group: "Звук", name: "Шумоподавление", value: "активное" },
@@ -215,7 +215,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Наушники",
     brand: "Apple",
     priceRub: 54990,
-    photo: "/products/airpods-max.jpg",
+    photo: "/products/airpods-max.webp",
     desc: "Накладные наушники: пространственный звук, шумоподавление, алюминиевые чашки.",
     specs: [
       { group: "Звук", name: "Пространственный звук", value: "есть" },
@@ -231,7 +231,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Гаджеты",
     brand: "Apple",
     priceRub: 39990,
-    photo: "/products/apple-watch-s10.jpg",
+    photo: "/products/apple-watch-s10.webp",
     desc: "Датчик температуры, быстрая зарядка, защита от воды 50 м.",
     specs: [
       { group: "Корпус", name: "Размер", value: "46", unit: "мм", numeric: 46 },
@@ -249,7 +249,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Гаджеты",
     brand: "Apple",
     priceRub: 12990,
-    photo: "/products/homepod-mini.png",
+    photo: "/products/homepod-mini.webp",
     desc: "Умная колонка с Siri и объёмным звуком, управление умным домом.",
     specs: [
       { group: "Звук", name: "Объёмный звук", value: "360°" },
@@ -265,7 +265,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Игровые приставки",
     brand: "Sony",
     priceRub: 54990,
-    photo: "/products/ps5.png",
+    photo: "/products/ps5.webp",
     desc: "SSD 825 ГБ, трассировка лучей, 4K до 120 к/с. Геймпад DualSense в комплекте.",
     specs: [
       { group: "Память", name: "SSD", value: "825", unit: "ГБ", numeric: 825 },
@@ -283,7 +283,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Игровые приставки",
     brand: "Sony",
     priceRub: 6990,
-    photo: "/products/dualsense.jpg",
+    photo: "/products/dualsense.webp",
     desc: "Адаптивные курки, HD-вибрация, до 10 часов автономности.",
     specs: [
       { group: "Питание", name: "Автономность", value: "до 10", unit: "ч", numeric: 10 },
@@ -299,7 +299,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Игровые приставки",
     brand: "Nintendo",
     priceRub: 34990,
-    photo: "/products/switch-oled.jpg",
+    photo: "/products/switch-oled.webp",
     desc: "OLED-экран 7″, память 64 ГБ, док-станция и Joy-Con в комплекте.",
     specs: [
       { group: "Экран", name: "Диагональ", value: "7", unit: "″", numeric: 7 },
@@ -316,7 +316,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Игровые приставки",
     brand: "Microsoft",
     priceRub: 59990,
-    photo: "/products/xbox-series-x.jpg",
+    photo: "/products/xbox-series-x.webp",
     desc: "12 Тфлопс, SSD 1 ТБ, 4K до 120 к/с, поддержка Game Pass.",
     specs: [
       { group: "Память", name: "SSD", value: "1024", unit: "ГБ", numeric: 1024 },
@@ -330,7 +330,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Бытовая техника",
     brand: "Dyson",
     priceRub: 44990,
-    photo: "/products/dyson-supersonic.png",
+    photo: "/products/dyson-supersonic.webp",
     desc: "Умный контроль температуры, двигатель V9, 1600 Вт. Три насадки в комплекте.",
     specs: [
       { group: "Питание", name: "Мощность", value: "1600", unit: "Вт", numeric: 1600 },
@@ -346,7 +346,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Бытовая техника",
     brand: "Dyson",
     priceRub: 54990,
-    photo: "/products/dyson-airwrap.jpg",
+    photo: "/products/dyson-airwrap.webp",
     desc: "Сушка и укладка без экстремального нагрева, насадки Coanda.",
     specs: [
       { group: "Питание", name: "Мощность", value: "1300", unit: "Вт", numeric: 1300 },
@@ -359,7 +359,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Бытовая техника",
     brand: "Dyson",
     priceRub: 69990,
-    photo: "/products/dyson-v15.png",
+    photo: "/products/dyson-v15.webp",
     desc: "Лазерная подсветка пыли, LCD-экран, до 60 минут работы.",
     specs: [
       { group: "Питание", name: "Мощность всасывания", value: "240", unit: "аВт", numeric: 240 },
@@ -373,7 +373,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Бытовая техника",
     brand: "Roborock",
     priceRub: 49990,
-    photo: "/products/roborock-s7.jpg",
+    photo: "/products/roborock-s7.webp",
     desc: "Сухая и влажная уборка, лидар-навигация, управление из приложения.",
     specs: [
       { group: "Питание", name: "Разрежение", value: "2500", unit: "Па", numeric: 2500 },
@@ -387,7 +387,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     category: "Бытовая техника",
     brand: "Xiaomi",
     priceRub: 3990,
-    photo: "/products/xiaomi-kettle.png",
+    photo: "/products/xiaomi-kettle.webp",
     desc: "Двойные стенки, поддержание температуры до 12 часов.",
     specs: [
       { group: "Питание", name: "Мощность", value: "1800", unit: "Вт", numeric: 1800 },

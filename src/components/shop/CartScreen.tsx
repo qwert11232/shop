@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiHeaders, haptic } from "@/lib/telegram-webapp";
 import { money, plural } from "@/lib/format";
+import ProductImage from "@/components/ui/ProductImage";
 
 export type CartLine = {
   productId: string;
@@ -90,7 +91,7 @@ export default function CartScreen(props: {
           >
             <div className="flex gap-2.5 p-2.5 bg-paper">
               <div className="h-[68px] w-[68px] shrink-0 rounded-[10px] bg-[#f6f6f6]">
-                <img src={line.photoUrl} alt={line.title} className="h-full w-full object-contain p-1" loading="lazy" />
+                <ProductImage src={line.photoUrl} alt={line.title} className="h-full w-full object-contain p-1" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-[13px] font-semibold leading-snug line-clamp-2">{line.title}</div>

@@ -72,6 +72,7 @@ async function main() {
 
   await checkEmptyDatabaseBootstrap();
   await checkDatabaseUrlParsing();
+  await checkPhotoMigration();
 
   console.log("[check:pg] PASS — SQL-слой совместим с PostgreSQL");
 }
@@ -175,4 +176,56 @@ async function checkDatabaseUrlParsing(): Promise<void> {
   assert(sanitized.includes("sslmode=require"), "sslmode при этом сохраняется");
 
   assert(analyzeDatabaseUrl("file:./dev.db").dialect === "sqlite", "SQLite-путь не считается ошибкой");
+}
+
+/**
+ * Переезд фото в WebP на базе, созданной прошлым деплоем.
+ *
+ * Сборка сжимает картинки в `public/products/*.webp` и удаляет исходные PNG/JPEG.
+ * В базе при этом остаются старые пути — без миграции витрина показала бы битые
+ * фото. Проверяем на настоящем PostgreSQL: существующий товар получает новый
+ * путь, а свежий сид сразу пишет WebP.
+ */
+async function checkPhotoMigration(): Promise<void> {
+  const pg = new PGlite();
+  await pg.exec(await readFile(path.join(process.cwd(), "db-setup.sql"), "utf8"));
+  const db = createPostgresDb("postgres://local/migrate", {
+    query: async (text: string, values?: unknown[]) => ({ rows: (await pg.query(text, values)).rows }),
+  });
+  const { __setDbForCheck } = await import("../src/lib/db");
+  __setDbForCheck(db);
+
+  // Товар из прошлого деплоя: старое название из сида и путь к PNG.
+  await db.run("INSERT INTO categories (id, name, icon, sort_order) VALUES (?, ?, ?, ?)", ["c-old", "Аксессуары", "", 0]);
+  await db.run(
+    "INSERT INTO products (id, title, description, price, photo_url, category_id) VALUES (?, ?, ?, ?, ?, ?)",
+    ["p-old", "Чехол силиконовый MagSafe", "старое описание", 349000, "/products/iphone-16-pro.jpg", "c-old"],
+  );
+  await db.run("INSERT INTO product_media (id, product_id, kind, url, sort_order) VALUES (?, ?, ?, ?, ?)", [
+    "m-old", "p-old", "image", "/products/iphone-16-pro.jpg", 1,
+  ]);
+
+  const { seedCatalog } = await import("../src/lib/seed");
+  const result = await seedCatalog();
+  assert(result.backfilled >= 1, "сид доводит существующий товар прошлого деплоя");
+
+  const migrated = await db.get<{ photo_url: string }>("SELECT photo_url FROM products WHERE id = 'p-old'");
+  assert(migrated?.photo_url === "/products/iphone-16-pro.webp", "старый путь .jpg у существующего товара переведён в .webp");
+
+  const media = await db.all<{ url: string }>("SELECT url FROM product_media WHERE product_id = 'p-old' ORDER BY sort_order");
+  assert(media.every((m) => m.url.endsWith(".webp")), "галерея существующего товара тоже переведена в .webp");
+
+  const price = await db.get<{ price: number | string }>("SELECT price FROM products WHERE id = 'p-old'");
+  assert(Number(price?.price) === 349000, "цену, изменённую владельцем, сид не трогает");
+  const desc = await db.get<{ description: string }>("SELECT description FROM products WHERE id = 'p-old'");
+  assert(desc?.description === "старое описание", "описание владельца сид не переписывает");
+
+  const stale = await db.all<{ id: string }>(
+    "SELECT id FROM products WHERE photo_url LIKE '%.jpg' OR photo_url LIKE '%.png'",
+  );
+  assert(stale.length === 0, "после сида не остаётся товаров со старыми путями фото");
+
+  const external = await db.get<{ id: string }>("SELECT id FROM products LIMIT 1");
+  assert(Boolean(external), "товары в базе есть");
+  __setDbForCheck(null);
 }

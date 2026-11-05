@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { money } from "@/lib/format";
+import ProductImage from "@/components/ui/ProductImage";
 
 type Compared = { id: string; title: string; price: number; photoUrl: string; brand: string };
 type Row = { name: string; unit: string; values: (string | null)[]; better?: number };
@@ -67,7 +68,7 @@ export default function CompareScreen(props: {
                 <th key={product.id} className="border-b border-rule p-2 align-bottom min-w-[124px]">
                   <button onClick={() => props.onOpen(product.id)} className="block text-left w-full">
                     <div className="aspect-square rounded-[8px] bg-[#f6f6f6] mb-1.5">
-                      <img src={product.photoUrl} alt={product.title} className="h-full w-full object-contain p-1" />
+                      <ProductImage src={product.photoUrl} alt={product.title} className="h-full w-full object-contain p-1" />
                     </div>
                     <div className="meta">{product.brand}</div>
                     <div className="font-semibold leading-tight line-clamp-2">{product.title}</div>

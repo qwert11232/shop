@@ -6,7 +6,7 @@
  * Проверяем поведение функций, которые вызывают API-роуты: если логика
  * сломается, здесь это видно до деплоя.
  */
-import { mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 
@@ -263,6 +263,34 @@ async function main() {
   );
   assert((await catalog.compareProducts([pair[0]])) === null, "одного товара для сравнения мало");
   assert((await catalog.compareProducts([...pair, ...products.slice(2, 5).map((p) => p.id)]))!.products.length === 3, "сравниваются не больше трёх моделей");
+
+  // ── Переезд старых путей фото ─────────────────────────────────────────────
+  const { migratePhotoUrl } = await import("../src/lib/seed");
+  assert(migratePhotoUrl("/products/ps5.png") === "/products/ps5.webp", "старый путь PNG переводится в WebP");
+  assert(migratePhotoUrl("/products/a.jpeg") === "/products/a.webp", "старый путь JPEG переводится в WebP");
+  assert(
+    migratePhotoUrl("https://cdn.example.com/x.jpg") === "https://cdn.example.com/x.jpg",
+    "внешние фото (S3/R2) не переписываются",
+  );
+  assert(
+    migratePhotoUrl("/uploads/user-photo.png") === "/uploads/user-photo.png",
+    "фото, загруженные владельцем, не переписываются",
+  );
+
+  // ── Фото: файлы на месте и не тяжёлые ──────────────────────────────────────
+  // Скорость витрины на мобильном интернете = суммарный вес картинок. Проверяем
+  // по настоящим файлам в public/products, а не по обещаниям скрипта сжатия.
+  assert(
+    products.every((p) => p.photoUrl.endsWith(".webp")),
+    "все товары ссылаются на сжатые WebP",
+  );
+  const missing = products.filter((p) => !existsSync(path.join(process.cwd(), "public", p.photoUrl)));
+  assert(missing.length === 0, `файл каждого фото есть в public (${products.length - missing.length}/${products.length})`);
+
+  const sizes = products.map((p) => statSync(path.join(process.cwd(), "public", p.photoUrl)).size);
+  const totalKb = Math.round(sizes.reduce((a, b) => a + b, 0) / 1024);
+  assert(Math.max(...sizes) < 200 * 1024, `самое тяжёлое фото меньше 200 КБ (${Math.round(Math.max(...sizes) / 1024)} КБ)`);
+  assert(totalKb < 900, `весь каталог фото меньше 900 КБ (${totalKb} КБ)`);
 
   rmSync(dir, { recursive: true, force: true });
   console.log("[check:shop] PASS — фильтры, карточка, корзина, заказ, бонусы, отзывы, избранное и сравнение работают");

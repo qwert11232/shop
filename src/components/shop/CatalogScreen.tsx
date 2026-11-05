@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { haptic } from "@/lib/telegram-webapp";
 import { money } from "@/lib/format";
+import ProductImage from "@/components/ui/ProductImage";
 
 type Product = {
   id: string;
@@ -325,7 +326,7 @@ export default function CatalogScreen(props: {
                   </div>
                 </div>
               ))
-            : products.map((p) => (
+            : products.map((p, index) => (
                 <article key={p.id} className="card text-left relative">
                   <button
                     onClick={() => {
@@ -336,7 +337,7 @@ export default function CatalogScreen(props: {
                     aria-label={`Открыть ${p.title}`}
                   >
                     <div className="aspect-square bg-[#f6f6f6]">
-                      <img src={p.photoUrl} alt={p.title} className="h-full w-full object-contain p-2" loading="lazy" />
+                      <ProductImage src={p.photoUrl} alt={p.title} priority={index < 6} wrapperClassName="h-full w-full" />
                     </div>
                     <div className="p-2.5 border-t border-rule">
                       {p.brand && <div className="meta mb-0.5">{p.brand}</div>}

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { apiHeaders, haptic } from "@/lib/telegram-webapp";
 import { money } from "@/lib/format";
+import ProductImage from "@/components/ui/ProductImage";
 
 type Product = {
   id: string;
@@ -106,7 +107,7 @@ export default function FavoritesScreen(props: {
               className="h-[68px] w-[68px] shrink-0 rounded-[10px] bg-[#f6f6f6]"
               aria-label={`Открыть ${product.title}`}
             >
-              <img src={product.photoUrl} alt={product.title} className="h-full w-full object-contain p-1" loading="lazy" />
+              <ProductImage src={product.photoUrl} alt={product.title} className="h-full w-full object-contain p-1" />
             </button>
             <div className="flex-1 min-w-0">
               {product.brand && <div className="meta">{product.brand}</div>}
