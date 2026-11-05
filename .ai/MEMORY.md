@@ -34,7 +34,7 @@
 | --- | --- |
 | Проект / продукт | **ТЕХНОЛАБ** — Telegram Mini App «витрина» магазина техники; заявки уходят в группу |
 | Ветка по умолчанию | `main` |
-| Рабочая ветка агента | `arena/95219020-shop` (HEAD `d71206b`, PR #4) |
+| Рабочая ветка агента | `arena/95219020-shop` (HEAD `ae82867`, открытый PR) |
 | Дизайн | три цвета: `paper #fff` / `ink #0a0a0a` / `signal #e00b20`; Manrope 400–700; SVG-иконки `src/components/icons.tsx`; `docs/DESIGN.md` |
 | Стек | TypeScript, Next.js 15 (App Router), React 19, Tailwind v4; БД по `DATABASE_URL`: SQLite (better-sqlite3) / PostgreSQL (pg); фото — S3-совместимое хранилище или `public/uploads/`; Vercel |
 | Точка входа | `src/app/page.tsx` (витрина), `src/app/admin/page.tsx` (панель владельца), `/api/health` (диагностика) |
