@@ -63,6 +63,10 @@ blob-report/
 .DS_Store
 Thumbs.db
 
+# Несжатые исходники фото: нужны только скрипту optimize:images, в репозитории
+# держим сжатые WebP — сборка на Vercel качает репозиторий целиком.
+public/products/originals/
+
 # Локальная БД и загруженные владельцем фото
 *.db
 *.db-journal

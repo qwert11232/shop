@@ -2,7 +2,7 @@
 
 > **Проект живёт в этом репозитории поверх каркаса `.ai/`.**
 > Запуск: `npm install && npm run db:seed && npm run dev` → http://localhost:3000
-> Документация: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/DESIGN.md](docs/DESIGN.md) · [docs/TELEGRAM-SETUP.md](docs/TELEGRAM-SETUP.md)
+> Документация: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/DESIGN.md](docs/DESIGN.md) · [docs/TELEGRAM-SETUP.md](docs/TELEGRAM-SETUP.md) · [docs/TELEGRAM-BOT.md](docs/TELEGRAM-BOT.md)
 > Бриф: `.ai/PROMPTS/brief-2026-11-04-tekhnolab.md` · Переменные окружения: `.env.example`
 
 ---

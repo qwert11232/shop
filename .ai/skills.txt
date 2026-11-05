@@ -72,12 +72,12 @@ GITHUB_ID: Rithprohos/telegram-mini-app-skills
 # Каталог инструментов, шаблонов и баз знаний по мини-аппам.
 # # GITHUB_ID: telegram-mini-apps-dev/awesome-telegram-mini-apps
 
-# --- UI/UX: борьба с однообразием ---------------------------------------------
+# --- UI/UX: активно для редизайна ТЕХНОЛАБ (2026-11-05) ------------------------
 # Anti-AI Slop: банит ИИ-штампы, 161 правило сеток и стилей.
-# # GITHUB_ID: Vanszs/Anti-AI-UI
+GITHUB_ID: Vanszs/Anti-AI-UI
 #
 # Аудитор UI: находит выдающие ИИ паттерны и заставляет переписать под брендбук.
-# # GITHUB_ID: funboy322/avoid-ai-design
+GITHUB_ID: funboy322/avoid-ai-design
 #
 # Переносные скиллы для дизайнеров: Web Design и Codex-воркфлоу по жёстким ТЗ.
 # # GITHUB_ID: MengTo/Skills

@@ -16,6 +16,8 @@ export interface Db {
   all<T = DbRow>(sql: string, params?: unknown[]): Promise<T[]>;
   get<T = DbRow>(sql: string, params?: unknown[]): Promise<T | undefined>;
   run(sql: string, params?: unknown[]): Promise<void>;
+  /** Несколько операторов без параметров (DDL схемы). Простой протокол, без плейсхолдеров. */
+  exec(sql: string): Promise<void>;
 }
 
 export function databaseUrl(): string {
@@ -41,10 +43,24 @@ export async function getDb(): Promise<Db> {
   return loading;
 }
 
+/**
+ * Подмена адаптера для проверок (scripts/check-postgres.ts): позволяет прогнать
+ * настоящие repo/seed-функции на pglite вместо боевой базы. В приложении не вызывается.
+ */
+export function __setDbForCheck(db: Db | null): void {
+  instance = db;
+  loading = db ? Promise.resolve(db) : null;
+}
+
 async function createDb(url: string): Promise<Db> {
   if (isPostgresUrl(url)) {
     const { createPostgresDb } = await import("./db-postgres");
-    return createPostgresDb(url);
+    const { ensurePostgresSchema } = await import("./db-postgres-schema");
+    const db = createPostgresDb(url);
+    // На управляемой базе (Neon/Supabase) схему некому накатить: CLI миграций нет.
+    // Идемпотентный DDL из db-setup.sql выполняется один раз на процесс.
+    await ensurePostgresSchema(db);
+    return db;
   }
   const { createSqliteDb } = await import("./db-sqlite");
   return createSqliteDb(url.replace(/^file:/, ""));
