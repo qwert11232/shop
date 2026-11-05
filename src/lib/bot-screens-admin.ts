@@ -2,7 +2,7 @@ import type { AdminOrder, Category, OrderStatus, Product } from "./repo";
 import type { CustomerSummary } from "./shop";
 import type { InlineButton, Keyboard } from "./bot-api";
 import { appUrl } from "./bot-access";
-import { deliveryLabel, DELIVERY_STEPS } from "./shop";
+import { deliveryLabel, nextDeliveryStep, trackAllowed } from "./shop";
 import { esc, money, shortDate } from "./bot-screens";
 
 /**
@@ -600,21 +600,35 @@ export function orderAdminScreen(order: AdminOrder, items: { title: string; vari
     `Создан: ${shortDate(order.createdAt)}`,
     order.comment ? `Комментарий: <i>${esc(order.comment)}</i>` : "",
     "",
-    `<b>Доставка:</b> ${deliveryLabel(order.deliveryStatus)}`,
-    order.trackNumber ? `Трек-номер: <code>${esc(order.trackNumber)}</code>` : "Трек-номер не указан",
+    `<b>Статус:</b> ${deliveryLabel(order.deliveryStatus)}`,
+    order.trackNumber
+      ? `Трек-номер: <code>${esc(order.trackNumber)}</code>`
+      : trackAllowed(order.deliveryStatus)
+        ? "Трек-номер не указан"
+        : "<i>Трек-номер появится после отправки</i>",
+    paymentLine(order.deliveryStatus),
   ]
     .filter(Boolean)
     .join("\n");
 
+  // Кнопки повторяют путь заказа: подтвердить → оплата получена → отправлено → трек.
+  // «Готов к выдаче» не навязываем (нужен для ПВЗ), но оставляем как вариант.
   const deliveryRows: InlineButton[][] = [];
   if (next) {
-    deliveryRows.push([{ text: `Дальше: ${deliveryLabel(next)}`, callback_data: `delivery:${order.id}:${next}` }]);
+    deliveryRows.push([
+      { text: nextActionLabel(order.deliveryStatus, next), callback_data: `delivery:${order.id}:${next}` },
+    ]);
   }
-  const others = DELIVERY_STEPS.filter((step) => step !== next && step !== order.deliveryStatus).map((step) => ({
-    text: deliveryLabel(step),
-    callback_data: `delivery:${order.id}:${step}`,
-  }));
-  if (others.length) deliveryRows.push(others);
+  const manual: InlineButton[] = [];
+  if (order.deliveryStatus !== "cancelled" && order.deliveryStatus !== "pickup" && next !== "pickup") {
+    manual.push({ text: "Готов к выдаче", callback_data: `delivery:${order.id}:pickup` });
+  }
+  if (!trackAllowed(order.deliveryStatus)) {
+    manual.push({ text: "Трек — после отправки", callback_data: `track:${order.id}` });
+  } else if (!order.trackNumber) {
+    manual.push({ text: "Добавить трек", callback_data: `track:${order.id}` });
+  }
+  if (manual.length) deliveryRows.push(manual);
 
   return {
     text,
@@ -639,11 +653,25 @@ export function orderAdminScreen(order: AdminOrder, items: { title: string; vari
   };
 }
 
-export function nextDeliveryStep(current: string): string | null {
-  if (current === "cancelled" || current === "done") return null;
-  const index = DELIVERY_STEPS.indexOf(current as (typeof DELIVERY_STEPS)[number]);
-  if (index === -1) return "packing";
-  return DELIVERY_STEPS[Math.min(index + 1, DELIVERY_STEPS.length - 1)];
+/**
+ * Подпись кнопки перехода: владельцу важно действие, а не название статуса.
+ * «Оплата получена» понятнее, чем «Ожидает отправки».
+ */
+export function nextActionLabel(current: string, next: string): string {
+  if (current === "cancelled") return "Вернуть в работу";
+  if (next === "confirmed") return "Подтвердить заказ";
+  if (next === "paid") return "Оплата получена";
+  if (next === "shipped") return "Отправлено";
+  if (next === "done") return "Получено";
+  return `Дальше: ${deliveryLabel(next)}`;
+}
+
+/** Строка про оплату в карточке заказа: что делать владельцу прямо сейчас. */
+export function paymentLine(status: string): string {
+  if (status === "new") return "Оплата: <i>после подтверждения заказа</i>";
+  if (status === "confirmed") return "Оплата: <b>ожидается</b> — нажмите «Оплата получена»";
+  if (status === "cancelled") return "Оплата: —";
+  return "Оплата: <b>получена</b>";
 }
 
 /** Фильтр заявок в панели: CRM-статус + доставка, чтобы видеть «в работе». */

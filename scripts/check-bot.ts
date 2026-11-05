@@ -10,6 +10,12 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 
+async function dbAllFlow(orderId: string): Promise<{ status: string }[]> {
+  const { getDb } = await import("../src/lib/db");
+  const db = await getDb();
+  return db.all<{ status: string }>("SELECT status FROM order_events WHERE order_id = ? ORDER BY created_at", [orderId]);
+}
+
 function assert(cond: unknown, message: string) {
   if (!cond) {
     console.error(`[check:bot] FAIL — ${message}`);
@@ -116,19 +122,36 @@ async function main() {
   const cardBefore = adminScreensEarly.orderAdminScreen((await repo.getOrderById(order.id))!, []);
   const deliveryButtons = cardBefore.keyboard.inline_keyboard.flat();
   assert(
-    deliveryButtons.some((b) => "callback_data" in b && b.callback_data === `delivery:${order.id}:packing`),
-    "в карточке заявки есть кнопка статуса доставки",
+    deliveryButtons.some((b) => "callback_data" in b && b.callback_data === `delivery:${order.id}:confirmed`),
+    "в карточке заявки есть кнопка «Подтвердить заказ»",
+  );
+  const trackButton = deliveryButtons.find((b) => "callback_data" in b && b.callback_data === `track:${order.id}`);
+  assert(
+    trackButton && "text" in trackButton && trackButton.text.includes("после отправки"),
+    "до отправки кнопка трека честно говорит, что трек ставится после отправки",
   );
   assert(
-    deliveryButtons.some((b) => "callback_data" in b && b.callback_data === `track:${order.id}`),
-    "в карточке заявки есть кнопка трек-номера",
+    cardBefore.text.includes("Ожидает подтверждения"),
+    "в карточке виден статус клиента: ожидает подтверждения",
   );
   assert(
     deliveryButtons.some((b) => "callback_data" in b && b.callback_data === `ocomment:${order.id}`),
     "в карточке заявки есть кнопка комментария клиенту",
   );
-  assert(admin.nextDeliveryStep("packing") === "shipped", "следующий шаг доставки: передан в доставку");
-  assert(admin.nextDeliveryStep("done") === null, "после получения шагов больше нет");
+  // Путь заказа: ожидает → подтверждён → оплачен → отправлен → получен.
+  const status = await import("../src/lib/order-status");
+  assert(status.nextDeliveryStep("new") === "confirmed", "после заявки шаг «подтвердить заказ»");
+  assert(status.nextDeliveryStep("confirmed") === "paid", "после подтверждения шаг «оплата получена»");
+  assert(status.nextDeliveryStep("paid") === "shipped", "после оплаты шаг «отправлено»");
+  assert(status.nextDeliveryStep("packing") === "shipped", "исторический packing ведёт к отправке");
+  assert(status.nextDeliveryStep("shipped") === "done", "после отправки шаг «получено»");
+  assert(status.nextDeliveryStep("done") === null, "после получения шагов больше нет");
+  assert(status.deliveryLabel("new") === "Ожидает подтверждения", "клиент видит «ожидает подтверждения»");
+  assert(status.deliveryLabel("paid") === "Ожидает отправки", "после оплаты — «ожидает отправки»");
+  assert(status.deliveryLabel("shipped") === "Отправлено", "оправленный заказ — «отправлено»");
+  assert(!status.trackAllowed("confirmed"), "трек нельзя ставить до отправки");
+  assert(status.trackAllowed("shipped"), "трек доступен после отправки");
+  assert(admin.nextActionLabel("confirmed", "paid") === "Оплата получена", "кнопка называется действием, а не статусом");
 
   assert(await shop.setDeliveryStatus(order.id, "shipped"), "статус доставки меняется");
   const shipped = (await repo.getOrderById(order.id))!;
@@ -143,7 +166,7 @@ async function main() {
   assert(withTrack.trackNumber === "RU123-456789", "трек-номер сохранён");
   const cardWithTrack = adminScreensEarly.orderAdminScreen(withTrack, []);
   assert(cardWithTrack.text.includes("RU123-456789"), "карточка показывает трек-номер клиенту-админу");
-  assert(cardWithTrack.text.includes("Ждёт в ПВЗ"), "карточка показывает человеческий статус доставки");
+  assert(cardWithTrack.text.includes("Готов к выдаче"), "карточка показывает человеческий статус доставки («Готов к выдаче»)");
 
   const prompt = screens.trackPromptScreen(withTrack);
   assert(prompt.text.includes(order.id), "подсказка трека называет заявку");
@@ -352,6 +375,49 @@ async function main() {
   assert(tg.ordersReceiverConfigured(), "с группой заказ уходит в группу");
   delete process.env.GROUP_CHAT_ID;
   delete process.env.BOT_TOKEN;
+
+  // ── Путь заказа: уведомление → подтверждение → оплата → отправка → трек ────
+  // Сценарий клиента: заказ создан, админ ведёт его по шагам, клиенту на каждый
+  // шаг приходит текст, а трек нельзя поставить раньше отправки.
+  assert(status.customerStatusNotice({ id: "o", total: 100, deliveryStatus: "new" }) === null,
+    "на новую заявку клиенту не шлём — это ответ на его же действие");
+  const noticeConfirmed = status.customerStatusNotice({ id: "o1", total: 8999000, deliveryStatus: "confirmed" });
+  assert(noticeConfirmed?.includes("подтверждён") && noticeConfirmed.includes("89 990"), "клиент узнаёт о подтверждении и сумме");
+  const noticePaid = status.customerStatusNotice({ id: "o1", total: 8999000, deliveryStatus: "paid" });
+  assert(noticePaid?.includes("ожидает отправки"), "после оплаты клиент видит «ожидает отправки»");
+  const noticeShipped = status.customerStatusNotice({ id: "o1", total: 100, deliveryStatus: "shipped", trackNumber: "RU123" });
+  assert(noticeShipped?.includes("отправлен") && noticeShipped.includes("RU123"), "об отправке приходит сообщение с треком");
+  const noticeCancelled = status.customerStatusNotice({ id: "o1", total: 100, deliveryStatus: "cancelled", comment: "нет в наличии" });
+  assert(noticeCancelled?.includes("отменён") && noticeCancelled.includes("нет в наличии"), "об отмене сообщаем с причиной");
+  assert(noticeCancelled?.includes("бонусы"), "при отмене напоминаем про возврат бонусов");
+
+  // Сквозной путь по базе: new → confirmed → paid → shipped → done + трек.
+  const realProduct = await repo.listProductsAdmin();
+  const flowItem = realProduct[0];
+  const flowOrder = await shop.createPurchaseOrder({
+    tgUserId: "888",
+    contactName: "Путь",
+    contactPhone: "+79990000000",
+    comment: "",
+    bonusToUse: 0,
+    total: 100000,
+    items: [{ productId: flowItem.id, quantity: 1 }],
+  });
+  assert(flowOrder.deliveryStatus === "new", "новый заказ начинается со статуса «ожидает подтверждения»");
+  assert(status.deliveryLabel(flowOrder.deliveryStatus) === "Ожидает подтверждения", "клиент видит понятную подпись");
+  assert(await shop.setDeliveryStatus(flowOrder.id, "confirmed"), "админ подтверждает заказ");
+  assert(await shop.setDeliveryStatus(flowOrder.id, "paid"), "админ отмечает оплату");
+  assert(await shop.setDeliveryStatus(flowOrder.id, "shipped", "RU999888777"), "админ отправляет заказ с треком");
+  const shippedFlow = (await shop.listMyOrders("888")).find((o) => o.id === flowOrder.id)!;
+  assert(shippedFlow.deliveryStatus === "shipped" && shippedFlow.trackNumber === "RU999888777",
+    "клиент в кабинете видит статус «Отправлено» и трек-номер");
+  assert(status.deliveryStepIndex("shipped") === 3, "на полосе прогресса отправка — четвёртый шаг");
+  assert(status.deliveryStepIndex("cancelled") === -1, "у отменённого заказа прогресс не рисуется");
+  const history = await dbAllFlow(flowOrder.id);
+  // Оформление пишет событие `new` (клиент), дальнейшие шаги — по одному на действие.
+  assert(history.length === 4, `каждый шаг пишется в историю заказа (${history.length} события)`);
+  assert(["new", "confirmed", "paid", "shipped"].every((st) => history.some((h) => h.status === st)),
+    "в истории есть оформление, подтверждение, оплата и отправка");
 
   rmSync(dir, { recursive: true, force: true });
   console.log("[check:bot] PASS — доступ, экраны, товары, варианты, характеристики, бонусы и заказы работают");

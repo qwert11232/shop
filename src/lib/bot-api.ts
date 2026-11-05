@@ -112,8 +112,13 @@ export function editMessage(chatId: number | string, messageId: number, text: st
   });
 }
 
-export function answerCallback(id: string, text?: string) {
-  return callBot("answerCallbackQuery", { callback_query_id: id, text, show_alert: false });
+/**
+ * Ответ на нажатие кнопки. `alert` показывает всплывающее окно вместо короткой
+ * плашки — нужно, когда владельцу важно не пропустить (например, «уведомление
+ * клиенту не ушло, бот заблокирован»).
+ */
+export function answerCallback(id: string, text?: string, alert = false) {
+  return callBot("answerCallbackQuery", { callback_query_id: id, text, show_alert: alert });
 }
 
 export function setWebhook(url: string, secret: string) {

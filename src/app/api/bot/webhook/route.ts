@@ -40,7 +40,7 @@ import {
   variantsScreen,
   type Draft,
 } from "@/lib/bot-screens-admin";
-import { buildOrderMessage, userLabel } from "@/lib/telegram";
+import { buildOrderMessage, notifyCustomer, userLabel } from "@/lib/telegram";
 import { withDeliveryLine, withStatusLine } from "@/lib/order-message";
 import {
   clearBotSession,
@@ -58,7 +58,17 @@ import {
   updateProduct,
   type OrderStatus,
 } from "@/lib/repo";
-import { deliveryLabel, isDeliveryStatus, listCustomers, listOrderItems, setDeliveryStatus, getCustomer, listMyOrders } from "@/lib/shop";
+import {
+  deliveryLabel,
+  isDeliveryStatus,
+  listCustomers,
+  listOrderItems,
+  setDeliveryStatus,
+  getCustomer,
+  listMyOrders,
+  trackAllowed,
+  customerStatusNotice,
+} from "@/lib/shop";
 import {
   addGalleryImage,
   addGalleryVideo,
@@ -293,6 +303,17 @@ async function handleSessionInput(chatId: number, kind: string, payload: string,
         await sendMessage(chatId, "Заявка не найдена — возможно, её удалили.");
         return;
       }
+      // Трек имеет смысл только у отправленного заказа: иначе клиент увидит
+      // номер рядом со статусом «Ожидает оплаты» и решит, что посылка в пути.
+      if (!trackAllowed(order.deliveryStatus)) {
+        await clearBotSession(chat);
+        await sendMessage(
+          chatId,
+          "Трек-номер ставится после отправки. Сначала переведите заказ в статус «Отправлено».",
+        );
+        await showOrder(chatId, order.id);
+        return;
+      }
       const track = normalizeTrack(text);
       if (!track) {
         await sendMessage(chatId, "Нужен трек-номер из 4–40 символов: латиница, цифры, дефис. Например: RU123456789.");
@@ -301,6 +322,12 @@ async function handleSessionInput(chatId: number, kind: string, payload: string,
       }
       await setDeliveryStatus(order.id, isDeliveryStatus(order.deliveryStatus) ? order.deliveryStatus : "new", track);
       await showOrder(chatId, order.id);
+      // Клиенту трек нужен сразу, а не когда он зайдёт в кабинет.
+      const updated = await getOrderById(order.id);
+      if (updated) {
+        const notice = customerStatusNotice(updated);
+        if (notice) await notifyCustomer(updated.tgUserId, notice);
+      }
       return;
     }
 
@@ -635,10 +662,18 @@ async function handleCallback(update: BotUpdate): Promise<void> {
         return;
       }
       const order = await getOrderById(orderId);
-      await answerCallback(query.id, `Доставка: ${deliveryLabel(next)}`);
+      await answerCallback(query.id, `Статус: ${deliveryLabel(next)}`);
       if (order) {
         await showOrder(chatId, orderId, messageId);
         await syncGroupStatus(order, (order.status as OrderStatus) ?? "new", query.from.first_name, next);
+        // Клиент получает сообщение на каждый шаг: он уже вышел из Mini App.
+        const notice = customerStatusNotice(order);
+        if (notice) {
+          const delivered = await notifyCustomer(order.tgUserId, notice);
+          if (!delivered) {
+            await answerCallback(query.id, "Клиенту не отправлено: бот заблокирован или ID нет", true);
+          }
+        }
       }
       return;
     }
@@ -648,6 +683,11 @@ async function handleCallback(update: BotUpdate): Promise<void> {
       await answerCallback(query.id);
       if (!order) {
         await sendMessage(chatId, "Заявка не найдена.");
+        return;
+      }
+      if (!trackAllowed(order.deliveryStatus)) {
+        await answerCallback(query.id, "Сначала отметьте «Отправлено»", true);
+        await sendMessage(chatId, "Трек-номер ставится после отправки: сначала нажмите «Отправлено».");
         return;
       }
       await render(chatId, trackPromptScreen(order), messageId);

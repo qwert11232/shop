@@ -3,6 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiHeaders, haptic, inTelegram } from "@/lib/telegram-webapp";
 import { formatPhone, money, shortDate } from "@/lib/format";
+import {
+  DELIVERY_LABEL,
+  DELIVERY_STEPS,
+  deliveryStepIndex,
+  type DeliveryStatus,
+} from "@/lib/order-status";
+
+/** Обёртки над общим модулем: подписи нужны и как массив шагов, и как словарь. */
+const deliverySteps = () => DELIVERY_STEPS;
+const deliveryLabels = (): Record<string, string> => ({ ...DELIVERY_LABEL } satisfies Record<DeliveryStatus, string>);
 
 type Customer = {
   tgUserId: string;
@@ -24,21 +34,10 @@ type Order = {
   items: OrderItem[];
 };
 
-const STEPS = [
-  { key: "packing", label: "Собирается" },
-  { key: "shipped", label: "Передан в доставку" },
-  { key: "pickup", label: "Ждёт в ПВЗ" },
-  { key: "done", label: "Получен" },
-];
+/** Шаги и подписи — из общего модуля, чтобы бот и витрина говорили одинаково. */
+const STEPS = deliverySteps();
 
-const STATUS_LABEL: Record<string, string> = {
-  new: "Собирается",
-  packing: "Собирается",
-  shipped: "Передан в доставку",
-  pickup: "Ждёт в ПВЗ",
-  done: "Получен",
-  cancelled: "Отменён",
-};
+const STATUS_LABEL: Record<string, string> = deliveryLabels();
 
 /** Кабинет: профиль из Telegram, бонусы, реферал, заказы со статусами доставки. */
 export default function AccountScreen(props: {
@@ -369,8 +368,7 @@ function Header() {
 function OrderCard({ order, onOpen }: { order: Order; onOpen: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const cancelled = order.deliveryStatus === "cancelled";
-  const currentIndex = STEPS.findIndex((step) => step.key === order.deliveryStatus);
-  const activeIndex = order.deliveryStatus === "new" ? 0 : currentIndex;
+  const activeIndex = deliveryStepIndex(order.deliveryStatus);
 
   return (
     <article className="border border-rule rounded-[14px] p-3">
@@ -382,7 +380,11 @@ function OrderCard({ order, onOpen }: { order: Order; onOpen: (id: string) => vo
           </div>
           <div className="text-right">
             <div className="price text-[14px]">{money(order.total)}</div>
-            <div className={`text-[12px] font-semibold mt-0.5 ${cancelled ? "text-ink-2" : "text-ink"}`}>
+            <div
+              className={`text-[12px] font-semibold mt-0.5 ${
+                cancelled ? "text-ink-2" : order.deliveryStatus === "new" ? "text-signal" : "text-ink"
+              }`}
+            >
               {STATUS_LABEL[order.deliveryStatus] ?? order.deliveryStatus}
             </div>
           </div>
@@ -402,6 +404,16 @@ function OrderCard({ order, onOpen }: { order: Order; onOpen: (id: string) => vo
         )}
       </button>
 
+      {order.deliveryStatus === "new" && (
+        <p className="mt-2 text-[12px] leading-snug text-ink-2">
+          Менеджер подтвердит заказ и пришлёт сумму к оплате — обычно в течение рабочего дня.
+        </p>
+      )}
+      {order.deliveryStatus === "confirmed" && (
+        <p className="mt-2 text-[12px] leading-snug text-ink-2">
+          Заказ подтверждён. Оплатите по реквизитам, которые пришлёт менеджер, — после оплаты начнём сборку.
+        </p>
+      )}
       {order.trackNumber && (
         <div className="mt-2.5 flex items-center justify-between border border-rule rounded-[10px] px-2.5 py-1.5">
           <span className="meta">Трек-номер</span>

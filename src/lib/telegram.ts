@@ -225,3 +225,31 @@ export function ordersReceiverConfigured(): boolean {
 export function formatPrice(kopecks: number): string {
   return `${(kopecks / 100).toLocaleString("ru-RU").replace(/\u00a0|\u202f/g, " ")} ₽`;
 }
+
+/**
+ * Уведомление клиенту о статусе его заказа.
+ *
+ * Шлём напрямую в личку (`tg_user_id`), а не через группу: клиент мог давно
+ * закрыть Mini App, и статус иначе увидит только когда зайдёт снова.
+ * Ошибка отправки не должна ломать смену статуса — заказ важнее уведомления,
+ * поэтому результат возвращается как «ушло / не ушло», без исключений.
+ */
+export async function notifyCustomer(tgUserId: string | null | undefined, text: string): Promise<boolean> {
+  const token = process.env.BOT_TOKEN;
+  if (!token || !tgUserId) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: tgUserId, text, link_preview_options: { is_disabled: true } }),
+    });
+    const data = await res.json();
+    if (data?.ok) return true;
+    // 403 — клиент заблокировал бота: это нормальная ситуация, не ошибка приложения.
+    console.warn("[telegram] уведомление клиенту не ушло:", tgUserId, data?.description ?? "");
+    return false;
+  } catch (err) {
+    console.error("[telegram] notifyCustomer error:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}

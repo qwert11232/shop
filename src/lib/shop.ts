@@ -367,33 +367,24 @@ export async function clearCart(tgUserId: string): Promise<void> {
 // ─── Заказы ─────────────────────────────────────────────────────────────────
 
 /**
- * Статусы доставки. Их меняет владелец в боте — клиент видит в личном кабинете.
- * `new` — заявка только создана, `packing` — собирается, `shipped` — передан
- * в доставку, `pickup` — ждёт в ПВЗ, `done` — получен, `cancelled` — отменён.
+ * Статусы доставки — переиспользуем модуль `order-status.ts`, чтобы витрина,
+ * бот и сообщения администратору не расходились в подписях и порядке шагов.
  */
-export type DeliveryStatus = "new" | "packing" | "shipped" | "pickup" | "done" | "cancelled";
+export {
+  DELIVERY_LABEL,
+  DELIVERY_STATUSES,
+  DELIVERY_STEPS,
+  deliveryLabel,
+  isDeliveryStatus,
+  customerStatusNotice,
+  nextDeliveryStep,
+  trackAllowed,
+  type DeliveryStatus,
+} from "./order-status";
 
-const DELIVERY_STATUSES: DeliveryStatus[] = ["new", "packing", "shipped", "pickup", "done", "cancelled"];
-
-export function isDeliveryStatus(value: string): value is DeliveryStatus {
-  return (DELIVERY_STATUSES as string[]).includes(value);
-}
-
-const DELIVERY_LABEL: Record<DeliveryStatus, string> = {
-  new: "Собирается",
-  packing: "Собирается",
-  shipped: "Передан в доставку",
-  pickup: "Ждёт в ПВЗ",
-  done: "Получен",
-  cancelled: "Отменён",
-};
-
-export function deliveryLabel(status: string): string {
-  return isDeliveryStatus(status) ? DELIVERY_LABEL[status] : status;
-}
+import { isDeliveryStatus, type DeliveryStatus } from "./order-status";
 
 /** Порядок шагов для прогресс-бара в карточке заказа. */
-export const DELIVERY_STEPS: DeliveryStatus[] = ["packing", "shipped", "pickup", "done"];
 
 export type OrderItem = {
   title: string;

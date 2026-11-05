@@ -202,7 +202,12 @@ async function main() {
   assert(await shop.setDeliveryStatus(order.id, "shipped", "RU777"), "статус доставки меняется админом");
   const shipped = (await shop.listMyOrders(user)).find((o) => o.id === order.id)!;
   assert(shipped.deliveryStatus === "shipped" && shipped.trackNumber === "RU777", "клиент видит статус и трек");
-  assert(shop.deliveryLabel("pickup") === "Ждёт в ПВЗ", "статус читается по-русски");
+  // Подписи — из общего модуля статусов: клиент и бот говорят одинаково.
+  assert(shop.deliveryLabel("pickup") === "Готов к выдаче", "статус читается по-русски");
+  assert(shop.deliveryLabel("new") === "Ожидает подтверждения", "новый заказ называется «ожидает подтверждения»");
+  assert(shop.deliveryLabel("paid") === "Ожидает отправки", "оплаченный заказ — «ожидает отправки»");
+  assert(shop.nextDeliveryStep("confirmed") === "paid", "после подтверждения следующий шаг — оплата");
+  assert(!shop.trackAllowed("new"), "трек недоступен до отправки");
 
   // ── Отзывы ────────────────────────────────────────────────────────────────
   assert(!(await reviews.canReview(user, target.id)), "отзыв нельзя оставить до получения заказа");
