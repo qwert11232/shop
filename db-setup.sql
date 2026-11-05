@@ -1,6 +1,6 @@
 -- ============================================================================
 --  db-setup.sql — ТЕХНОЛАБ · схема БД для managed PostgreSQL (Neon/Supabase/RDS)
---  Версия схемы: 0002 · Дата: 2026-11-05 · PostgreSQL 15+
+--  Версия схемы: 0003 · Дата: 2026-11-05 · PostgreSQL 15+
 --
 --  Локально приложение использует SQLite (схема создаётся автоматически в
 --  src/lib/db.ts). Этот файл — для продакшена: поднимает схему одной вставкой
@@ -48,14 +48,24 @@ CREATE TABLE IF NOT EXISTS order_limits (
   created_at  BIGINT NOT NULL            -- unix ms, окно задаётся в коде
 );
 
+-- Состояние диалога админ-бота (переживает холодный старт инстанса).
+CREATE TABLE IF NOT EXISTS bot_state (
+  chat_id    TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  payload    TEXT NOT NULL DEFAULT '',
+  updated_at BIGINT NOT NULL             -- unix ms
+);
+
+
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
 CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id);
 CREATE INDEX IF NOT EXISTS idx_order_limits_client ON order_limits(client_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 
 COMMIT;
 
 -- ============================================================================
 --  ПРОВЕРКА (после COMMIT отдельными запросами):
---  SELECT count(*) FROM information_schema.tables WHERE table_schema='public'; -- ожидается: 4
+--  SELECT count(*) FROM information_schema.tables WHERE table_schema='public'; -- ожидается: 5
 --  SELECT count(*) FROM products;   -- после сидирования: 17
 -- ============================================================================

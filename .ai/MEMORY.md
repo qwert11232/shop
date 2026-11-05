@@ -39,9 +39,9 @@
 | Стек | TypeScript, Next.js 15 (App Router), React 19, Tailwind v4; БД по `DATABASE_URL`: SQLite (better-sqlite3) / PostgreSQL (pg); фото — S3-совместимое хранилище или `public/uploads/`; Vercel |
 | Точка входа | `src/app/page.tsx` (витрина), `src/app/admin/page.tsx` (панель владельца), `/api/health` (диагностика) |
 | Команда запуска | `npm run dev` (после `npm run db:seed`) |
-| Команды проверок | `npm run check` (lint + typecheck + check:storage + check:pg), `npm run build`, `npm run db:seed` |
-| Переменные окружения | `.env.example`: AUTO_SEED, DATABASE_URL, PGPOOL_MAX, S3_BUCKET/S3_REGION/S3_ENDPOINT/S3_PUBLIC_BASE_URL/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY, BOT_TOKEN, GROUP_CHAT_ID, OWNER_TELEGRAM_ID, WEBAPP_URL, ALLOW_DEV_NO_AUTH, DEV_NO_AUTH_HOSTS |
-| Статус проверок | PASS 2026-11-05: check:pg (включая пустую базу → схема → 17 товаров), lint 0, typecheck, build, dev + curl; см. Шаг 5 |
+| Команды проверок | `npm run check` (lint + typecheck + check:storage + check:pg + check:bot), `npm run build`, `npm run db:seed` |
+| Переменные окружения | `.env.example`: AUTO_SEED, ADMIN_TELEGRAM_IDS, ADMIN_TELEGRAM_USERNAMES, BOT_WEBHOOK_SECRET, BOT_SETUP_TOKEN, DATABASE_URL, PGPOOL_MAX, S3_BUCKET/S3_REGION/S3_ENDPOINT/S3_PUBLIC_BASE_URL/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY, BOT_TOKEN, GROUP_CHAT_ID, OWNER_TELEGRAM_ID, WEBAPP_URL, ALLOW_DEV_NO_AUTH, DEV_NO_AUTH_HOSTS |
+| Статус проверок | PASS 2026-11-05: check (5 прогонов, включая check:bot 30 утверждений), build, dev + curl вебхука; см. Шаг 6 |
 
 ### Что работает сейчас
 
@@ -53,6 +53,8 @@
 - Заявки: антидубль «клиент+товар» 60 с и лимит 5 заявок/мин на клиента (429), состояние в таблице `order_limits`.
 - БД: `src/lib/db.ts` — адаптер с `all/get/run`; `db-sqlite.ts` (схема сама) и `db-postgres.ts` (`?`→`$n`, пул).
 - Фото: `src/lib/storage.ts` — S3 (`S3_BUCKET`) или `public/uploads/`; на Vercel без S3 → 501.
+- Админ-бот: `/api/bot/webhook` (+ `/api/bot/setup`), команды `/start`, `/orders`, `/products`, `/id`,
+  `/help`; статусы заявок, правка цены/названия/фото и скрытие товара; кнопки статуса в группе.
 - Каталог: `src/lib/catalog-seed.ts` (6 категорий, 17 товаров) заливается идемпотентно
   через `src/lib/seed.ts`; на Vercel автоматически при первом запросе (`AUTO_SEED`).
 - Схема PostgreSQL применяется сама (`src/lib/db-postgres-schema.ts`) — DDL повторяет `db-setup.sql`.
@@ -95,6 +97,13 @@
 > - Риски: [что может сломаться и как это заметить]
 > - Проверка: [какие команды прогнали и с каким результатом]
 > ```
+
+### Шаг 6: Админ-бот — заявки и товары из Telegram (2026-11-05)
+- Контекст: нужна админка в Telegram. Референс — `qwert11232/mini` (теннисный клуб): вебхук с секретом, проверка админа по списку ID на сервере, inline-кнопки, одноразовая настройка вебхука, состояние диалога, ошибки БД видны админу в чате. ID владельца пришлют позже — весь код должен работать без них.
+- Решение: перенесена архитектура, не код (Vite/Neon-серверless там несовместим с Next). `src/lib/bot-api.ts` (клиент Bot API: токен не логируется, ошибки с методом и кодом), `bot-access.ts` (ADMIN_TELEGRAM_IDS / ADMIN_TELEGRAM_USERNAMES / OWNER_TELEGRAM_ID; пустой список = доступ закрыт, дефолтного чужого ID нет), `bot-screens.ts` (чистые экраны, HTML-экранирование пользовательских данных), `api/bot/webhook` (команды, кнопки, статусы, фото), `api/bot/setup` (setWebhook + setMyCommands + getWebhookInfo, доступ по BOT_SETUP_TOKEN, пошаговые ошибки). Статусы заявок new/contacted/done/cancelled с допустимыми переходами; сообщение в группе получает кнопки статуса и правится при смене. Состояние диалога — таблица `bot_state` (TTL 15 мин, одноразово), потому что на Vercel память инстанса не переживает холодный старт. Товары: название, цена, фото (забирается из Telegram через getFile и уходит в storage.ts), скрытие с витрины. Схема 0003 в `db-setup.sql` и автосхеме.
+- Альтернативы: node-telegram-bot-api/grammY — отклонено (одна зависимость ради 6 методов, а вебхук на Next всё равно свой); хранение состояния в памяти — отклонено (теряется между инстансами); приём фото ссылкой из Telegram — отклонено (ссылка живёт минуты и содержит токен; файл скачивается и кладётся в своё хранилище); зашитый ID владельца как в референсе — отклонено: это чужой человек.
+- Риски: без `BOT_WEBHOOK_SECRET` вебхук отвечает 503 (сознательно: иначе апдейты может слать кто угодно); фото из бота всегда сохраняется как `.jpg` независимо от исходного формата; правка сообщения в группе требует прав бота и работает только при наличии `group_message_id`.
+- Проверка: `npm run check:bot` — 30 утверждений (доступ, экранирование, кнопки, статусы, выручка, правка/скрытие товара, одноразовость состояния) на настоящей SQLite; `lint` 0, `typecheck`, `build`; dev + curl: вебхук без секрета 403, с неверным 403, с верным 200 и молчание для не-админа; `/api/bot/setup` без токена 401, с верным токеном 502 и пошаговой причиной (BOT_TOKEN не задан); проверка поймала два настоящих бага — boolean в bind SQLite и NBSP в форматтере цен.
 
 ### Шаг 5: Каталог на деплое — пустая база больше не даёт пустой витрины (2026-11-05)
 - Контекст: на Vercel каталог оказался пустым. Причина в коде, а не в вёрстке: данные лежали только в `scripts/seed.ts` (CLI, которого на деплое нет), SQLite-файл в `.gitignore`, схема PostgreSQL на управляемой базе никем не накатывалась — без неё `/api/catalog` отвечал 500, и фронт молча показывал пустое состояние.
@@ -146,7 +155,7 @@
 
 ## 4. NEXT STEPS — что делать следующему агенту
 
-1. Открыть `/api/health` на проде: если `ok: true` — каталог наполнен; если 500 — проверить `DATABASE_URL` и `sslmode=require`.
+1. Дождаться ID от владельца → `ADMIN_TELEGRAM_IDS` (+ при желании `ADMIN_TELEGRAM_USERNAMES`), задать `BOT_TOKEN`, `BOT_WEBHOOK_SECRET`, `BOT_SETUP_TOKEN`, `GROUP_CHAT_ID`, `WEBAPP_URL` → Redeploy → открыть `/api/bot/setup?token=…` (см. `docs/TELEGRAM-BOT.md`).
 2. Снять скриншоты витрины и админки в браузере и сверить с `docs/DESIGN.md` (в песочнице браузера нет).
 3. Когда владелец заведёт свои товары через `/admin` — выставить `AUTO_SEED=0`, иначе демо-товары вернутся после удаления.
 
@@ -161,3 +170,4 @@
 | 2026-11-05 | PG-адаптер, S3-хранилище, лимиты в БД, ESLint; память и правила обновлены | агент |
 | 2026-11-05 | Редизайн в три цвета, SVG-иконки, аудит скиллами; DESIGN.md переписан | агент |
 | 2026-11-05 | Автонаполнение каталога, автосхема PG, `/api/health`; память обновлена | агент |
+| 2026-11-05 | Админ-бот: вебхук, статусы заявок, правка товаров; `docs/TELEGRAM-BOT.md` | агент |

@@ -35,7 +35,7 @@ type Order = {
   productPhoto: string;
 };
 
-const fmt = (k: number) => `${(k / 100).toLocaleString("ru-RU")} ₽`;
+const fmt = (k: number) => `${(k / 100).toLocaleString("ru-RU").replace(/\u00a0|\u202f/g, " ")} ₽`;
 
 function headers() {
   const initData =
@@ -282,7 +282,7 @@ export default function AdminPanel() {
                   {o.priceLabel} — {o.firstName || "Гость"}
                   {o.username ? ` @${o.username}` : ""}
                 </div>
-                <div className="meta">{new Date(o.createdAt).toLocaleString("ru-RU")}</div>
+                <div className="meta">{new Date(o.createdAt).toLocaleString("ru-RU").replace(/\u00a0|\u202f/g, " ")}</div>
                 {o.comment && (
                   <div className="text-[12px] mt-1.5 border-l-2 border-signal pl-2 text-ink-2">{o.comment}</div>
                 )}

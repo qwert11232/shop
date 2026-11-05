@@ -47,7 +47,16 @@ CREATE TABLE IF NOT EXISTS order_limits (
   created_at   INTEGER NOT NULL
 );
 
+-- Состояние диалога админ-бота: переживает холодный старт инстанса.
+CREATE TABLE IF NOT EXISTS bot_state (
+  chat_id    TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  payload    TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id);
 CREATE INDEX IF NOT EXISTS idx_order_limits_client ON order_limits(client_key, created_at);
 `;
@@ -57,6 +66,15 @@ export function createSqliteDb(file: string): Db {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+
+  /**
+   * SQLite не умеет bind для boolean: `false` роняет запрос целиком.
+   * Приводим флаги к 1/0 здесь, а не в каждом вызове: иначе любое новое
+   * место с `is_active` падало бы только на локальной базе, а на PG работало.
+   */
+  function bindable(params: unknown[]): unknown[] {
+    return params.map((value) => (typeof value === "boolean" ? (value ? 1 : 0) : value));
+  }
 
   function prepare(sql: string) {
     try {
@@ -70,13 +88,13 @@ export function createSqliteDb(file: string): Db {
   return {
     dialect: "sqlite",
     async all<T = DbRow>(sql: string, params: unknown[] = []) {
-      return prepare(sql).all(...params) as T[];
+      return prepare(sql).all(...bindable(params)) as T[];
     },
     async get<T = DbRow>(sql: string, params: unknown[] = []) {
-      return prepare(sql).get(...params) as T | undefined;
+      return prepare(sql).get(...bindable(params)) as T | undefined;
     },
     async run(sql: string, params: unknown[] = []) {
-      prepare(sql).run(...params);
+      prepare(sql).run(...bindable(params));
     },
     async exec(sql: string) {
       db.exec(sql);

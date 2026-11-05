@@ -23,7 +23,7 @@ type Product = {
 };
 type Category = { id: string; name: string; icon: string; products: Product[] };
 
-const fmt = (kopecks: number) => `${(kopecks / 100).toLocaleString("ru-RU")} ₽`;
+const fmt = (kopecks: number) => `${(kopecks / 100).toLocaleString("ru-RU").replace(/\u00a0|\u202f/g, " ")} ₽`;
 
 function tgInitData(): string {
   return (window as unknown as { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp

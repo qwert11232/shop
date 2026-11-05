@@ -11,7 +11,9 @@
     "db:seed": "tsx scripts/seed.ts",
     "check:pg": "tsx scripts/check-postgres.ts",
     "check:storage": "tsx scripts/check-storage.ts",
-    "check": "npm run lint && npm run typecheck && npm run check:storage && npm run check:pg"
+    "check": "npm run lint && npm run typecheck && npm run check:storage && npm run check:pg && npm run check:bot",
+    "check:bot": "tsx scripts/check-bot.ts",
+    "bot:setup": "echo 'Откройте https://<домен>/api/bot/setup?token=<BOT_SETUP_TOKEN>'"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1162.0",

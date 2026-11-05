@@ -73,6 +73,8 @@ Telegram Mini App «витрина магазина техники». Владе
 | GET/POST | `/api/admin/categories` | владелец | список/создание категорий |
 | GET | `/api/admin/orders` | владелец | список заявок |
 | POST | `/api/admin/upload` | владелец | загрузка фото (multipart, ≤ 8 МБ, jpg/png/webp) → S3 или `public/uploads/` |
+| POST | `/api/bot/webhook` | Telegram (по секрету) | админ-бот: команды, кнопки, статусы |
+| GET/POST | `/api/bot/setup` | `BOT_SETUP_TOKEN` | вебхук, команды меню, диагностика (см. `docs/TELEGRAM-BOT.md`) |
 
 ## Переменные окружения (см. `.env.example`)
 
@@ -88,6 +90,10 @@ Telegram Mini App «витрина магазина техники». Владе
 - **Фото:** `src/lib/storage.ts` — S3-совместимое хранилище (`S3_*`) или локальный `public/uploads/`;
   на Vercel без S3 загрузка отвечает 501 вместо тихой потери файла.
 - **Лимиты заявок:** таблица `order_limits` в БД — общая для всех инстансов и переживает рестарт.
+- **Админ-бот:** вебхук `src/app/api/bot/webhook/route.ts`, экраны — `src/lib/bot-screens.ts`
+  (чистые функции, проверяются без сети), доступ — `src/lib/bot-access.ts`, клиент Bot API —
+  `src/lib/bot-api.ts`. Состояние диалога — таблица `bot_state` (одноразовая, TTL 15 минут).
+  Подробно: `docs/TELEGRAM-BOT.md`.
 - **Схема на деплое:** `src/lib/db-postgres-schema.ts` применяет тот же DDL, что `db-setup.sql`,
   при первом подключении (идемпотентно). На Neon/Supabase нет CLI миграций, поэтому без этого
   каталог отвечал бы 500 «relation does not exist».

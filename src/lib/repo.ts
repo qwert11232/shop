@@ -212,3 +212,178 @@ export async function reserveOrderSlot(input: {
   ]);
   return { ok: true };
 }
+
+// ─── Админ-бот ──────────────────────────────────────────────────────────────
+
+export type OrderStatus = "new" | "contacted" | "done" | "cancelled";
+const ORDER_STATUSES: OrderStatus[] = ["new", "contacted", "done", "cancelled"];
+
+export function isOrderStatus(value: string): value is OrderStatus {
+  return (ORDER_STATUSES as string[]).includes(value);
+}
+
+const STATUS_LABEL: Record<OrderStatus, string> = {
+  new: "новая",
+  contacted: "на связи",
+  done: "выполнена",
+  cancelled: "отменена",
+};
+
+export function orderStatusLabel(status: string): string {
+  return isOrderStatus(status) ? STATUS_LABEL[status] : status;
+}
+
+export type AdminOrder = Order & {
+  productTitle: string;
+  productPrice: number;
+  productPhoto: string;
+};
+
+/** Заявки одного статуса для бота: новые сверху. */
+export async function listOrdersByStatus(status: OrderStatus, limit = 10): Promise<AdminOrder[]> {
+  const db = await getDb();
+  const rows = await db.all<OrderRow & { producttitle: string; productprice: number; productphoto: string }>(
+    `SELECT o.*, p.title AS producttitle, p.price AS productprice, p.photo_url AS productphoto
+     FROM orders o JOIN products p ON p.id = o.product_id
+     WHERE o.status = ?
+     ORDER BY o.created_at DESC LIMIT ?`,
+    [status, limit],
+  );
+  return rows.map((r) => ({
+    ...ord(r),
+    productTitle: r.producttitle,
+    productPrice: Number(r.productprice),
+    productPhoto: r.productphoto,
+  }));
+}
+
+export async function getOrderById(id: string): Promise<AdminOrder | null> {
+  const db = await getDb();
+  const row = await db.get<OrderRow & { producttitle: string; productprice: number; productphoto: string }>(
+    `SELECT o.*, p.title AS producttitle, p.price AS productprice, p.photo_url AS productphoto
+     FROM orders o JOIN products p ON p.id = o.product_id WHERE o.id = ?`,
+    [id],
+  );
+  return row
+    ? {
+        ...ord(row),
+        productTitle: row.producttitle,
+        productPrice: Number(row.productprice),
+        productPhoto: row.productphoto,
+      }
+    : null;
+}
+
+/** message_id сообщения в группе: нужен, чтобы потом править его при смене статуса. */
+export async function setGroupMessageId(id: string, messageId: string): Promise<void> {
+  const db = await getDb();
+  await db.run("UPDATE orders SET group_message_id = ? WHERE id = ?", [messageId, id]);
+}
+
+export async function setOrderStatus(id: string, status: OrderStatus): Promise<boolean> {
+  const db = await getDb();
+  const existing = await db.get<{ id: string }>("SELECT id FROM orders WHERE id = ?", [id]);
+  if (!existing) return false;
+  await db.run("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+  return true;
+}
+
+export async function getProductById(id: string): Promise<Product | null> {
+  return getProduct(id);
+}
+
+export async function updateProduct(
+  id: string,
+  patch: { title?: string; priceKopecks?: number; photoUrl?: string; isActive?: boolean },
+): Promise<Product | null> {
+  const db = await getDb();
+  const current = await getProduct(id);
+  if (!current) return null;
+  const next = {
+    title: patch.title ?? current.title,
+    price: patch.priceKopecks ?? current.price,
+    photoUrl: patch.photoUrl ?? current.photoUrl,
+    isActive: patch.isActive ?? current.isActive,
+  };
+  await db.run("UPDATE products SET title = ?, price = ?, photo_url = ?, is_active = ? WHERE id = ?", [
+    next.title,
+    next.price,
+    next.photoUrl,
+    next.isActive,
+    id,
+  ]);
+  return getProduct(id);
+}
+
+export async function countsForBot(): Promise<{
+  newOrders: number;
+  products: number;
+  activeProducts: number;
+  revenueDone: number;
+}> {
+  const db = await getDb();
+  const newOrders = await db.get<{ c: number | string }>("SELECT COUNT(*) AS c FROM orders WHERE status = 'new'");
+  const products = await db.get<{ c: number | string }>("SELECT COUNT(*) AS c FROM products");
+  const active = await db.get<{ c: number | string }>(
+    `SELECT COUNT(*) AS c FROM products WHERE is_active = ${trueLiteral(db)}`,
+  );
+  const revenue = await db.get<{ s: number | string | null }>(
+    `SELECT COALESCE(SUM(p.price), 0) AS s FROM orders o JOIN products p ON p.id = o.product_id
+     WHERE o.status = 'done'`,
+  );
+  return {
+    newOrders: Number(newOrders?.c ?? 0),
+    products: Number(products?.c ?? 0),
+    activeProducts: Number(active?.c ?? 0),
+    revenueDone: Number(revenue?.s ?? 0),
+  };
+}
+
+// ─── Состояние диалога бота ─────────────────────────────────────────────────
+// Хранится в БД, а не в памяти процесса: на Vercel инстансы сменяются,
+// и «жду цену» из памяти пропадало бы при холодном старте.
+
+export type BotSession = { chatId: string; kind: string; payload: string };
+
+export async function setBotSession(session: BotSession): Promise<void> {
+  const db = await getDb();
+  const now = Date.now();
+  const existing = await db.get<{ chat_id: string }>("SELECT chat_id FROM bot_state WHERE chat_id = ?", [
+    session.chatId,
+  ]);
+  if (existing) {
+    await db.run("UPDATE bot_state SET kind = ?, payload = ?, updated_at = ? WHERE chat_id = ?", [
+      session.kind,
+      session.payload,
+      now,
+      session.chatId,
+    ]);
+  } else {
+    await db.run("INSERT INTO bot_state (chat_id, kind, payload, updated_at) VALUES (?, ?, ?, ?)", [
+      session.chatId,
+      session.kind,
+      session.payload,
+      now,
+    ]);
+  }
+}
+
+/** Состояние старше 15 минут не считается: админ мог просто отвлечься. */
+const BOT_SESSION_TTL_MS = 15 * 60_000;
+
+export async function takeBotSession(chatId: string): Promise<BotSession | null> {
+  const db = await getDb();
+  const row = await db.get<{ chat_id: string; kind: string; payload: string; updated_at: number | string }>(
+    "SELECT * FROM bot_state WHERE chat_id = ?",
+    [chatId],
+  );
+  if (!row) return null;
+  await db.run("DELETE FROM bot_state WHERE chat_id = ?", [chatId]);
+  if (Date.now() - Number(row.updated_at) > BOT_SESSION_TTL_MS) return null;
+  return { chatId: row.chat_id, kind: row.kind, payload: row.payload };
+}
+
+export async function clearBotSession(chatId: string): Promise<void> {
+  const db = await getDb();
+  await db.run("DELETE FROM bot_state WHERE chat_id = ?", [chatId]);
+}

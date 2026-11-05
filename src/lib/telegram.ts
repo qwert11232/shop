@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { orderKeyboard } from "./order-message";
 
 // avoid-ai-design-ignore-file: I2
 
@@ -123,16 +124,24 @@ export function buildOrderMessage(opts: {
   return lines.join("\n");
 }
 
-/** Отправка сообщения в группу через Bot API. Возвращает message_id или null. */
-export async function sendGroupMessage(text: string): Promise<string | null> {
+/**
+ * Отправка сообщения о заявке в группу. Если бот настроен, к сообщению
+ * цепляются кнопки смены статуса — владелец меняет статус прямо в группе.
+ */
+export async function sendGroupMessage(text: string, orderId?: string): Promise<string | null> {
   const token = process.env.BOT_TOKEN;
   const chatId = process.env.GROUP_CHAT_ID;
   if (!token || !chatId) return null;
   try {
+    const replyMarkup = orderId ? orderKeyboard(orderId) : undefined;
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      }),
     });
     const data = await res.json();
     if (data?.ok && data?.result?.message_id) return String(data.result.message_id);
@@ -145,5 +154,5 @@ export async function sendGroupMessage(text: string): Promise<string | null> {
 }
 
 export function formatPrice(kopecks: number): string {
-  return `${(kopecks / 100).toLocaleString("ru-RU")} ₽`;
+  return `${(kopecks / 100).toLocaleString("ru-RU").replace(/\u00a0|\u202f/g, " ")} ₽`;
 }

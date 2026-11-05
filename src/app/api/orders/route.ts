@@ -64,16 +64,23 @@ export async function POST(req: NextRequest) {
     date: new Date(),
   });
 
-  const groupMessageId = await sendGroupMessage(message);
-
+  // id нужен в кнопках статуса, поэтому заявка создаётся до отправки в группу,
+  // а message_id проставляется после — статус всё равно начинается с «new».
   const order = await createOrder({
     productId: product.id,
     comment,
     tgUserId: user ? String(user.id) : null,
     firstName: user ? [user.first_name, user.last_name].filter(Boolean).join(" ") || null : null,
     username: user?.username ?? null,
-    groupMessageId,
+    groupMessageId: null,
   });
+
+  const groupMessageId = await sendGroupMessage(message, order.id);
+
+  if (groupMessageId) {
+    const { setGroupMessageId } = await import("@/lib/repo");
+    await setGroupMessageId(order.id, groupMessageId);
+  }
 
   console.log(`[orders] new order ${order.id} product=${product.title} by=${label} sentToGroup=${!!groupMessageId}`);
 

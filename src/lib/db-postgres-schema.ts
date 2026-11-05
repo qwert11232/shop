@@ -49,9 +49,17 @@ CREATE TABLE IF NOT EXISTS order_limits (
   created_at  BIGINT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS bot_state (
+  chat_id    TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  payload    TEXT NOT NULL DEFAULT '',
+  updated_at BIGINT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
 CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id);
 CREATE INDEX IF NOT EXISTS idx_order_limits_client ON order_limits(client_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 `;
 
 let applied: Promise<void> | null = null;
