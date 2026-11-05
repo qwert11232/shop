@@ -73,6 +73,7 @@ async function main() {
   await checkEmptyDatabaseBootstrap();
   await checkDatabaseUrlParsing();
   await checkPhotoMigration();
+  await checkSettingsAndSearch();
 
   console.log("[check:pg] PASS — SQL-слой совместим с PostgreSQL");
 }
@@ -237,5 +238,54 @@ async function checkPhotoMigration(): Promise<void> {
 
   const external = await db.get<{ id: string }>("SELECT id FROM products LIMIT 1");
   assert(Boolean(external), "товары в базе есть");
+  __setDbForCheck(null);
+}
+
+/**
+ * Настройки магазина и поиск заказов на настоящем PostgreSQL.
+ *
+ * Почему отдельно: `searchOrders` использует `LIKE ... ESCAPE`, а таблица
+ * `settings` появилась в этом же коммите. На SQLite всё работает, но DDL и
+ * ESCAPE-синтаксис нужно проверить на том движке, который стоит на бою.
+ */
+async function checkSettingsAndSearch(): Promise<void> {
+  const pg = new PGlite();
+  await pg.exec(await readFile(path.join(process.cwd(), "db-setup.sql"), "utf8"));
+  const db = createPostgresDb("postgres://local/settings", {
+    query: async (text: string, values?: unknown[]) => ({ rows: (await pg.query(text, values)).rows }),
+  });
+  const { __setDbForCheck } = await import("../src/lib/db");
+  __setDbForCheck(db);
+
+  const settings = await import("../src/lib/settings");
+  await settings.setSetting("payment_details", "СБП +7 900 111-22-33");
+  await settings.setSetting("payment_link", "https://pay.example.com/o/1");
+  const saved = await settings.getSettings();
+  assert(saved.payment_details === "СБП +7 900 111-22-33", "реквизиты читаются из PostgreSQL");
+  await settings.setSetting("payment_details", "");
+  assert((await settings.getSettings()).payment_details === "", "пустая строка стирает настройку и на PostgreSQL");
+  await settings.setSetting("payment_note", "Чек в чат");
+  assert((await settings.getSettings()).payment_note === "Чек в чат", "повторная запись обновляет строку, а не падает");
+
+  // Поиск: точное совпадение, хвост номера, телефон, экранирование.
+  await db.run("INSERT INTO categories (id, name, icon, sort_order) VALUES (?, ?, ?, ?)", ["c1", "Тест", "", 0]);
+  await db.run("INSERT INTO products (id, title, description, price, photo_url, category_id) VALUES (?, ?, ?, ?, ?, ?)", [
+    "p1", "Товар", "описание для теста", 100000, "/products/ps5.webp", "c1",
+  ]);
+  await db.run(
+    "INSERT INTO orders (id, comment, tg_user_id, first_name, username, contact_phone, product_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ["ord-abc12345", "", "1", "Иван", "", "+79990001122", "p1"],
+  );
+  const { searchOrders, orderQueueCounts } = await import("../src/lib/repo");
+  assert((await searchOrders("abc12345")).length === 1, "поиск по хвосту номера работает на PostgreSQL");
+  assert((await searchOrders("Иван")).length === 1, "поиск по имени работает на PostgreSQL");
+  assert((await searchOrders("999000")).length === 1, "поиск по телефону работает на PostgreSQL");
+  assert((await searchOrders("zzzz")).length === 0, "несуществующий запрос ничего не находит на PostgreSQL");
+  assert((await searchOrders("100%")).length === 0, "процент в запросе не превращается в шаблон LIKE");
+  assert((await searchOrders("_")).length === 0, "подчёркивание не совпадает с любым символом");
+
+  await db.run("UPDATE orders SET delivery_status = 'confirmed' WHERE id = ?", ["ord-abc12345"]);
+  const queues = await orderQueueCounts();
+  assert(queues.awaitingPayment === 1, "очередь оплаты считается на PostgreSQL");
   __setDbForCheck(null);
 }

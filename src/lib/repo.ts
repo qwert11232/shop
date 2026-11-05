@@ -464,6 +464,29 @@ export async function countOrderItems(orderId: string): Promise<number> {
   return Number(row?.c ?? 0);
 }
 
+/**
+ * Заказы в конкретном статусе доставки (для очередей панели). Сортировка —
+ * от старых к новым: сверху то, что ждёт дольше всего.
+ */
+export async function listOrdersByDelivery(status: string, limit = 10): Promise<AdminOrder[]> {
+  const db = await getDb();
+  const statuses = status === "paid" ? ["paid", "packing"] : [status];
+  const placeholders = statuses.map(() => "?").join(", ");
+  const rows = await db.all<OrderRow & { producttitle: string; productprice: number; productphoto: string }>(
+    `SELECT o.*, p.title AS producttitle, p.price AS productprice, p.photo_url AS productphoto
+     FROM orders o JOIN products p ON p.id = o.product_id
+     WHERE o.delivery_status IN (${placeholders})
+     ORDER BY o.created_at ASC LIMIT ?`,
+    [...statuses, limit],
+  );
+  return rows.map((r) => ({
+    ...ord(r),
+    productTitle: r.producttitle,
+    productPrice: Number(r.productprice),
+    productPhoto: r.productphoto,
+  }));
+}
+
 export async function listOrdersByStatus(status: OrderStatus, limit = 10): Promise<AdminOrder[]> {
   const db = await getDb();
   const rows = await db.all<OrderRow & { producttitle: string; productprice: number; productphoto: string }>(
@@ -549,6 +572,33 @@ export async function updateProduct(
   return getProduct(id);
 }
 
+/**
+ * Счётчики для главного экрана панели.
+ *
+ * Владельцу нужен ответ на вопрос «что делать сейчас», а не общая статистика:
+ * поэтому отдельно считаем заказы, ожидающие подтверждения, оплаты и отправки.
+ * Считаем по статусу доставки, кроме новых — там достаточно CRM-статуса, иначе
+ * один и тот же заказ попал бы в два счётчика.
+ */
+export async function orderQueueCounts(): Promise<{
+  awaitingConfirm: number;
+  awaitingPayment: number;
+  awaitingShipment: number;
+  newOrders: number;
+}> {
+  const db = await getDb();
+  const one = async (sql: string) => {
+    const row = await db.get<{ c: number | string }>(sql);
+    return Number(row?.c ?? 0);
+  };
+  const newOrders = await one("SELECT COUNT(*) AS c FROM orders WHERE status = 'new'");
+  const awaitingPayment = await one("SELECT COUNT(*) AS c FROM orders WHERE delivery_status = 'confirmed'");
+  const awaitingShipment = await one(
+    "SELECT COUNT(*) AS c FROM orders WHERE delivery_status IN ('paid', 'packing')",
+  );
+  return { awaitingConfirm: newOrders, awaitingPayment, awaitingShipment, newOrders };
+}
+
 export async function countsForBot(): Promise<{
   newOrders: number;
   products: number;
@@ -620,4 +670,34 @@ export async function takeBotSession(chatId: string): Promise<BotSession | null>
 export async function clearBotSession(chatId: string): Promise<void> {
   const db = await getDb();
   await db.run("DELETE FROM bot_state WHERE chat_id = ?", [chatId]);
+}
+
+/**
+ * Поиск заказа для панели: по номеру (`ord-…` целиком или хвостом), по телефону
+ * или по имени клиента. Владелец в чате вводит то, что у него перед глазами:
+ * «4657», «+7999», «Иван». Пустой результат — нормальный ответ, а не ошибка.
+ */
+export async function searchOrders(query: string, limit = 10): Promise<AdminOrder[]> {
+  const db = await getDb();
+  const q = query.trim();
+  if (q.length < 2) return [];
+  // Экранируем % и _ в запросе: иначе «100%» и «_» начнут совпадать с чем угодно.
+  const escaped = q.replace(/[\\%_]/g, (char) => `\\${char}`);
+  const digits = q.replace(/\D/g, "");
+  const rows = await db.all<OrderRow & { producttitle: string; productprice: number; productphoto: string }>(
+    `SELECT o.*, p.title AS producttitle, p.price AS productprice, p.photo_url AS productphoto
+     FROM orders o JOIN products p ON p.id = o.product_id
+     WHERE o.id LIKE ? ESCAPE '\\' OR o.first_name LIKE ? ESCAPE '\\'
+        OR (? <> '' AND o.contact_phone LIKE ? ESCAPE '\\')
+     ORDER BY o.created_at DESC LIMIT ?`,
+    // Телефон ищем только когда в запросе есть цифры: иначе шаблон «%%» совпал
+    // бы со всеми заказами, а подставить «ничего» через пустую строку нельзя.
+    [`%${escaped}%`, `%${escaped}%`, digits, digits ? `%${digits}%` : "", limit],
+  );
+  return rows.map((r) => ({
+    ...ord(r),
+    productTitle: r.producttitle,
+    productPrice: Number(r.productprice),
+    productPhoto: r.productphoto,
+  }));
 }

@@ -108,6 +108,37 @@ export function nextDeliveryStep(current: string): DeliveryStatus | null {
 /** Статусы, в которых заказ ещё не завершён — для счётчиков и списков. */
 export const ACTIVE_DELIVERY_STATUSES: DeliveryStatus[] = ["new", "confirmed", "paid", "packing", "shipped", "pickup"];
 
+/** Реквизиты из настроек магазина (см. `settings.ts`). */
+export type PaymentInfo = {
+  details?: string;
+  link?: string;
+  note?: string;
+  phone?: string;
+};
+
+/**
+ * Блок «подтверждён + как оплатить».
+ *
+ * Если реквизиты не настроены, нельзя писать «оплатите по реквизитам» — клиент
+ * упрётся в пустоту и напишет в поддержку. В этом случае честно просим написать
+ * менеджеру; владельцу панель показывает предупреждение, что оплата не настроена.
+ */
+function paymentBlock(order: { id: string; total: number }, money: string, pay?: PaymentInfo): string {
+  const lines = [`✅ Заказ №${order.id} подтверждён`, `Сумма к оплате: <b>${money}</b>`];
+  if (pay?.details) {
+    lines.push("", "Реквизиты:", pay.details);
+  }
+  if (pay?.link) lines.push("", "Оплатить по ссылке:", pay.link);
+  if (pay?.note) lines.push("", pay.note);
+  if (!pay?.details && !pay?.link) {
+    lines.push("", "Напишите нам в этот чат — пришлём реквизиты и подтвердим оплату.");
+  } else {
+    lines.push("", "После оплаты пришлите чек сюда — отметим оплату и начнём сборку.");
+  }
+  if (pay?.phone) lines.push(`Вопросы: ${pay.phone}`);
+  return lines.join("\n");
+}
+
 /**
  * Текст уведомления клиенту при смене статуса.
  *
@@ -117,13 +148,19 @@ export const ACTIVE_DELIVERY_STATUSES: DeliveryStatus[] = ["new", "confirmed", "
  * Возвращает `null` для статусов, о которых писать нечего (`new` — это ответ
  * на его же заказ, уведомление было бы шумом).
  */
-export function customerStatusNotice(order: {
-  id: string;
-  total: number;
-  deliveryStatus: string;
-  trackNumber?: string;
-  comment?: string;
-}): string | null {
+export function customerStatusNotice(
+  order: {
+    id: string;
+    total: number;
+    deliveryStatus: string;
+    trackNumber?: string;
+    comment?: string;
+    /** Кому отвечаем: нужен вызывающему коду для отправки, в тексте не используется. */
+    tgUserId?: string | null;
+  },
+  /** Реквизиты из настроек магазина: их владелец вводит в панели. */
+  pay?: PaymentInfo,
+): string | null {
   const money = `${(order.total / 100).toLocaleString("ru-RU").replace(/\u00a0|\u202f/g, " ")} ₽`;
   const deadline = "Служба доставки — 3–7 дней, точный срок придёт с трек-номером.";
 
@@ -131,11 +168,7 @@ export function customerStatusNotice(order: {
     case "new":
       return null;
     case "confirmed":
-      return [
-        `✅ Заказ №${order.id} подтверждён`,
-        `Сумма к оплате: ${money}.`,
-        "Напишите менеджеру в этот чат, чтобы оплатить — после оплаты заказ пойдёт в сборку.",
-      ].join("\n");
+      return paymentBlock(order, money, pay);
     case "paid":
       return [
         `💳 Оплата по заказу №${order.id} получена`,
@@ -169,7 +202,8 @@ export function customerStatusNotice(order: {
       return [
         `❌ Заказ №${order.id} отменён`,
         order.comment ? `Причина: ${order.comment}` : "",
-        "Если списывались бонусы, они вернулись на счёт. Связаться с менеджером можно в этом чате.",
+        "Если списывались бонусы, они вернулись на счёт.",
+        pay?.phone ? `Связаться с магазином: ${pay.phone}` : "Связаться с менеджером можно в этом чате.",
       ]
         .filter(Boolean)
         .join("\n");

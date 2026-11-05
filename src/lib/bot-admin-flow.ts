@@ -345,3 +345,73 @@ export async function applyBonus(
   }
   return { ok: true, balance: result.balance };
 }
+
+// ─── Массовые действия ─────────────────────────────────────────────────────
+
+export type BulkResult = { affected: number; total: number };
+
+/**
+ * Скрыть или показать все товары категории.
+ *
+ * Возвращает и «сколько изменили», и «сколько всего в категории»: если владелец
+ * скрыл категорию, где всё уже было скрыто, он должен увидеть «0 изменений»,
+ * а не думать, что нажатие потерялось.
+ */
+export async function bulkSetActive(categoryId: string, active: boolean): Promise<BulkResult> {
+  const db = await getDb();
+  const total = await db.get<{ c: number | string }>("SELECT COUNT(*) AS c FROM products WHERE category_id = ?", [
+    categoryId,
+  ]);
+  const changed = await db.get<{ c: number | string }>(
+    `SELECT COUNT(*) AS c FROM products WHERE category_id = ? AND is_active = ${active ? "0" : "1"}`,
+    [categoryId],
+  );
+  await db.run(
+    `UPDATE products SET is_active = ${active ? "1" : "0"} WHERE category_id = ?`,
+    [categoryId],
+  );
+  return { affected: Number(changed?.c ?? 0), total: Number(total?.c ?? 0) };
+}
+
+/**
+ * Изменить цены всех товаров категории на процент.
+ *
+ * Процент считается от текущей цены и округляется до рубля: иначе после «+10%»
+ * на витрине появляются цены вида 39 590,10 ₽ — в чеке и в чате такое читать
+ * неприятно, а копейки всё равно ни на что не влияют. Минимальная цена — 1 ₽:
+ * «-50%» на дешёвой позиции не должна сделать её бесплатной. Надбавки вариантов
+ * (`extra`) процент не трогает — это отдельные цены.
+ */
+export async function bulkReprice(categoryId: string, percent: number): Promise<BulkResult> {
+  const db = await getDb();
+  const rows = await db.all<{ id: string; price: number | string }>(
+    "SELECT id, price FROM products WHERE category_id = ?",
+    [categoryId],
+  );
+  let affected = 0;
+  for (const row of rows) {
+    const price = Number(row.price);
+    // Округление до рубля: (цена × (100 ± процент) / 100), затем до 100 копеек.
+    const raw = Math.round((price * (100 + percent)) / 100);
+    const next = Math.max(100, Math.round(raw / 100) * 100);
+    if (next === price) continue;
+    await db.run("UPDATE products SET price = ? WHERE id = ?", [next, row.id]);
+    affected += 1;
+  }
+  return { affected, total: rows.length };
+}
+
+/** Сколько товаров категории сейчас на витрине и сколько скрыто. */
+export async function categoryVisibility(categoryId: string): Promise<{ total: number; active: number; hidden: number }> {
+  const db = await getDb();
+  const total = await db.get<{ c: number | string }>("SELECT COUNT(*) AS c FROM products WHERE category_id = ?", [
+    categoryId,
+  ]);
+  const active = await db.get<{ c: number | string }>(
+    "SELECT COUNT(*) AS c FROM products WHERE category_id = ? AND is_active = 1",
+    [categoryId],
+  );
+  const all = Number(total?.c ?? 0);
+  const shown = Number(active?.c ?? 0);
+  return { total: all, active: shown, hidden: all - shown };
+}

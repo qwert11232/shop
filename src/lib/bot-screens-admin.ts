@@ -4,6 +4,7 @@ import type { InlineButton, Keyboard } from "./bot-api";
 import { appUrl } from "./bot-access";
 import { deliveryLabel, nextDeliveryStep, trackAllowed } from "./shop";
 import { esc, money, shortDate } from "./bot-screens";
+import { SETTING_DEFS, type ShopSettings } from "./settings";
 
 /**
  * Экраны панели: добавление товара, правка категории/бренда/описания, фото,
@@ -58,9 +59,10 @@ export function productsListScreen(products: Product[], page: number, query = ""
         slice.map((p, index) => ({ text: String(current * PAGE_SIZE + index + 1), callback_data: `product:${p.id}` })),
         ...(nav.length ? [nav] : []),
         [
-          { text: "Добавить товар", callback_data: "add:new" },
+          { text: "Добавить", callback_data: "add:new" },
           { text: "Найти", callback_data: "find:ask" },
         ],
+        [{ text: "Массовые действия", callback_data: "bulk" }],
         [{ text: "‹ Меню", callback_data: "menu" }],
       ],
     },
@@ -681,3 +683,280 @@ export const ORDER_FILTERS: { key: string; label: string; status: OrderStatus }[
   { key: "done", label: "Выполнены", status: "done" },
   { key: "cancelled", label: "Отменены", status: "cancelled" },
 ];
+
+// ─── Оплата: реквизиты и ссылка ─────────────────────────────────────────────
+
+/**
+ * Экран «Оплата». Владелец видит, что уже настроено, и может изменить любую
+ * строку. Пока реквизитов нет — клиент не получит, куда платить, поэтому
+ * экран подсказывает, что именно нужно минимум (реквизиты или ссылка).
+ */
+export function paymentScreen(settings: ShopSettings): { text: string; keyboard: Keyboard } {
+  const has = Boolean(settings.payment_details || settings.payment_link);
+  const lines = [
+    "<b>Оплата</b>",
+    has
+      ? "Клиент получает реквизиты и кнопку оплаты вместе с подтверждением заказа."
+      : "Пока не настроено: клиент не узнает, куда платить. Заполните реквизиты или ссылку.",
+    "",
+  ];
+  for (const def of SETTING_DEFS) {
+    const value = settings[def.key];
+    lines.push(`<b>${def.label}:</b> ${value ? esc(value) : "<i>не задано</i>"}`);
+  }
+  lines.push("", "<i>Нажмите строку, чтобы изменить. Пустое сообщение стирает значение.</i>");
+
+  // По две кнопки в ряд: четыре пункта не растягивают сообщение.
+  const rows: InlineButton[][] = [
+    [
+      { text: "Реквизиты", callback_data: "payset:payment_details" },
+      { text: "Ссылка", callback_data: "payset:payment_link" },
+    ],
+    [
+      { text: "Приписка", callback_data: "payset:payment_note" },
+      { text: "Телефон", callback_data: "payset:shop_phone" },
+    ],
+    [{ text: "‹ Меню", callback_data: "menu" }],
+  ];
+  return { text: lines.join("\n"), keyboard: { inline_keyboard: rows } };
+}
+
+/** Подсказка для ввода одной настройки: что это, пример, как стереть. */
+export function paymentPromptScreen(key: string): { text: string; keyboard: Keyboard } {
+  const def = SETTING_DEFS.find((item) => item.key === key);
+  const label = def?.label ?? "Значение";
+  return {
+    text: [
+      `<b>${esc(label)}</b>`,
+      "",
+      def?.hint ?? "",
+      "",
+      `<i>Например:</i> <code>${esc(def?.example ?? "")}</code>`,
+      def?.key === "payment_link" ? "Можно прислать без https:// — адрес допишется сам." : "",
+      "",
+      "Пришлите текст одним сообщением. Чтобы стереть — отправьте «-».",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    keyboard: { inline_keyboard: [[{ text: "‹ Назад", callback_data: "pay" }]] },
+  };
+}
+
+// ─── Массовые действия с товарами ───────────────────────────────────────────
+
+/**
+ * Экран массовых действий. Два сценария владельца:
+ *   1) «скрыть всё из категории на время» / «вернуть на витрину»;
+ *   2) «поднять цены на 5% в категории».
+ * Поэтому выбор один — категория, а действие кнопкой. Категории показываем
+ * с количеством товаров, чтобы не гадать, где что.
+ */
+export function bulkScreen(categories: { id: string; name: string; productCount: number }[]): {
+  text: string;
+  keyboard: Keyboard;
+} {
+  const rows: InlineButton[][] = categories.map((category) => [
+    { text: `${category.name} (${category.productCount})`, callback_data: `bulkcat:${category.id}` },
+  ]);
+  return {
+    text: [
+      "<b>Массовые действия</b>",
+      "",
+      "Выберите категорию — дальше скроете/покажете все её товары или измените цены.",
+      "",
+      "<i>Действие применяется ко всем товарам категории сразу.</i>",
+    ].join("\n"),
+    keyboard: { inline_keyboard: [...rows, [{ text: "‹ Меню", callback_data: "menu" }]] },
+  };
+}
+
+/** Экран действий для выбранной категории: скрыть/показать, цена, назад. */
+export function bulkCategoryScreen(
+  category: { id: string; name: string },
+  counts: { total: number; active: number; hidden: number },
+): { text: string; keyboard: Keyboard } {
+  return {
+    text: [
+      `<b>${esc(category.name)}</b>`,
+      "",
+      `Товаров: <b>${counts.total}</b> — на витрине ${counts.active}, скрыто ${counts.hidden}`,
+      "",
+      "<b>Цены</b> меняются в процентах: «+5» поднимет, «-10» снизит.",
+      "<b>Скрыть</b> убирает товары с витрины, но не удаляет их.",
+    ].join("\n"),
+    keyboard: {
+      inline_keyboard: [
+        [
+          { text: "Скрыть все", callback_data: `bulk:hide:${category.id}` },
+          { text: "Показать все", callback_data: `bulk:show:${category.id}` },
+        ],
+        [{ text: "Изменить цены", callback_data: `bulk:price:${category.id}` }],
+        [{ text: "‹ Категории", callback_data: "bulk" }],
+      ],
+    },
+  };
+}
+
+/**
+ * Разбор введённого процента: «+5», «5», «-10», «+5%». Возвращает null, если
+ * это не процент — тогда панель просит повторить, а не молча меняет цены.
+ * Допустимый диапазон ±50%: больше похоже на опечатку и рушит каталог.
+ */
+export function parsePricePercent(raw: string): number | null {
+  const value = raw.trim().replace(/[%\s]/g, "").replace(",", ".");
+  if (!/^[+-]?\d{1,2}(\.\d)?$/.test(value)) return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === 0) return null;
+  if (Math.abs(number) > 50) return null;
+  return number;
+}
+
+/** Текст подтверждения перед применением массового действия. */
+export function bulkConfirmText(kind: string, categoryName: string, count: number, extra = ""): string {
+  if (kind === "hide") return `Скрыть <b>${count}</b> товаров в «${esc(categoryName)}»? Они исчезнут с витрины.`;
+  if (kind === "show") return `Вернуть на витрину <b>${count}</b> товаров в «${esc(categoryName)}»?`;
+  return `Изменить цены на <b>${extra}</b> у <b>${count}</b> товаров в «${esc(categoryName)}»?`;
+}
+
+// ─── Очереди заказов и поиск ────────────────────────────────────────────────
+
+/**
+ * Очередь заказов по статусу доставки: «ждут оплаты» и «ждут отправки».
+ * Сверху — то, что ждёт дольше всех, и сумма к оплате: с этим владелец идёт
+ * сверять перевод. Пять первых заказов получают кнопки, остальные видны текстом —
+ * иначе клавиатура на 20 кнопок закрывает пол-экрана.
+ */
+export function queueScreen(orders: AdminOrder[], status: string): { text: string; keyboard: Keyboard } {
+  const title = status === "paid" ? "Ждут отправки" : "Ждут оплаты";
+  const hint =
+    status === "paid"
+      ? "Оплата получена — соберите и передайте в доставку, потом нажмите «Отправлено»."
+      : "Подтвердили заказ, но оплата не отмечена. Клиент получил реквизиты.";
+
+  if (orders.length === 0) {
+    return {
+      text: [`<b>${title}</b>`, "", `<i>Пусто — ${status === "paid" ? "всё отправлено." : "все оплаты отмечены."}</i>`].join(
+        "\n",
+      ),
+      keyboard: { inline_keyboard: [[{ text: "‹ Меню", callback_data: "menu" }]] },
+    };
+  }
+
+  const lines = orders.map((order, index) => {
+    const who = order.firstName ? esc(order.firstName) : "Гость";
+    const phone = order.contactPhone ? ` · ${esc(order.contactPhone)}` : "";
+    return [
+      `${index + 1}. <b>${esc(order.productTitle)}</b> — ${money(order.total || order.productPrice)}`,
+      `   ${who}${phone} · ${shortDate(order.createdAt)}`,
+      `   <i>${esc(deliveryLabel(order.deliveryStatus))}</i>`,
+    ].join("\n");
+  });
+
+  const buttons = orders.slice(0, 5).map((order, index) => ({
+    text: `${index + 1} · ${money(order.total || order.productPrice)}`,
+    callback_data: `order:${order.id}`,
+  }));
+
+  return {
+    text: [`<b>${title}</b> — ${orders.length}`, "", hint, "", lines.join("\n\n")].join("\n"),
+    keyboard: {
+      inline_keyboard: [
+        ...(buttons.length ? [buttons] : []),
+        [
+          { text: "Найти заказ", callback_data: "ofind" },
+          { text: "‹ Меню", callback_data: "menu" },
+        ],
+      ],
+    },
+  };
+}
+
+/** Приглашение ввести номер заказа, телефон или имя клиента. */
+export function orderSearchPromptScreen(): { text: string; keyboard: Keyboard } {
+  return {
+    text: [
+      "<b>Поиск заказа</b>",
+      "",
+      "Пришлите номер заказа, телефон клиента или его имя.",
+      "",
+      "<i>Номер можно ввести не полностью — хватит последних 4–5 символов.</i>",
+      "<i>Например: </i><code>k3f9</code><i> или </i><code>+7999</code>",
+    ].join("\n"),
+    keyboard: { inline_keyboard: [[{ text: "‹ Меню", callback_data: "menu" }]] },
+  };
+}
+
+/** Результат поиска: найденные заказы кнопками либо честное «ничего не нашлось». */
+export function orderSearchResultScreen(query: string, orders: AdminOrder[]): { text: string; keyboard: Keyboard } {
+  if (orders.length === 0) {
+    return {
+      text: [
+        `<b>Поиск:</b> ${esc(query)}`,
+        "",
+        "<i>Ничего не нашлось. Проверьте номер или пришлите телефон целиком.</i>",
+      ].join("\n"),
+      keyboard: {
+        inline_keyboard: [
+          [{ text: "Искать ещё", callback_data: "ofind" }],
+          [{ text: "‹ Меню", callback_data: "menu" }],
+        ],
+      },
+    };
+  }
+  const lines = orders.map((order, index) => {
+    const who = order.firstName ? esc(order.firstName) : "Гость";
+    return [
+      `${index + 1}. <b>${esc(order.productTitle)}</b> — ${money(order.total || order.productPrice)}`,
+      `   №${esc(order.id)} · ${who} · ${esc(deliveryLabel(order.deliveryStatus))}`,
+      `   ${shortDate(order.createdAt)}`,
+    ].join("\n");
+  });
+  return {
+    text: [`<b>Поиск:</b> ${esc(query)} — найдено ${orders.length}`, "", lines.join("\n\n")].join("\n"),
+    keyboard: {
+      inline_keyboard: [
+        orders.slice(0, 5).map((order) => ({ text: `№${order.id.slice(-4)} · ${money(order.total)}`, callback_data: `order:${order.id}` })),
+        [{ text: "Искать ещё", callback_data: "ofind" }],
+        [{ text: "‹ Меню", callback_data: "menu" }],
+      ],
+    },
+  };
+}
+
+/** Приглашение ввести процент для изменения цен категории. */
+export function bulkPricePromptScreen(category: { id: string; name: string }): { text: string; keyboard: Keyboard } {
+  return {
+    text: [
+      `<b>Цены · ${esc(category.name)}</b>`,
+      "",
+      "Пришлите изменение в процентах:",
+      "<code>+5</code> — поднять на 5%",
+      "<code>-10</code> — снизить на 10%",
+      "",
+      "<i>Допустимо от −50% до +50%. Цена не опустится ниже 1 ₽.</i>",
+      "<i>Надбавки вариантов не меняются.</i>",
+    ].join("\n"),
+    keyboard: {
+      inline_keyboard: [
+        [
+          { text: "+5%", callback_data: `bulkdo:${category.id}:5` },
+          { text: "+10%", callback_data: `bulkdo:${category.id}:10` },
+        ],
+        [{ text: "‹ Назад", callback_data: `bulkcat:${category.id}` }],
+      ],
+    },
+  };
+}
+
+/** Итог массового изменения цен: сколько изменилось и на сколько. */
+export function bulkPriceResultText(categoryName: string, percent: number, affected: number, total: number): string {
+  const sign = percent > 0 ? "+" : "";
+  return [
+    `<b>Цены обновлены</b> — ${esc(categoryName)}`,
+    "",
+    `Изменено товаров: <b>${affected}</b> из ${total} (${sign}${percent}%)`,
+    affected === 0 ? "<i>Цены уже были такими — ничего не поменялось.</i>" : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}

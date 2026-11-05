@@ -142,6 +142,12 @@ CREATE TABLE IF NOT EXISTS order_events (
   created_at BIGINT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS bot_state (
   chat_id    TEXT PRIMARY KEY,
   kind       TEXT NOT NULL,

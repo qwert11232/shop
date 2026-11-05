@@ -40,38 +40,62 @@ export function shortDate(raw: string): string {
   });
 }
 
+/**
+ * Главный экран панели.
+ *
+ * Задача экрана — ответить «что делать сейчас», а не показать всё подряд.
+ * Поэтому сверху три очереди работы: заказы ждут подтверждения, оплаты, отправки.
+ * Кнопки очередей неактивны, когда пусто (Telegram не даёт «серые» кнопки,
+ * поэтому пишем «0» прямо в названии и убираем переход — нажатие всё равно
+ * откроет пустой список, и это нормально). Ниже — товары и служебные разделы.
+ */
 export function menuScreen(stats: {
   newOrders: number;
+  awaitingPayment: number;
+  awaitingShipment: number;
   activeProducts: number;
   revenueDone: number;
+  paymentConfigured: boolean;
 }): Screen {
+  const queue: string[] = [];
+  if (stats.newOrders > 0) queue.push(`Подтвердить: <b>${stats.newOrders}</b>`);
+  if (stats.awaitingPayment > 0) queue.push(`Ждут оплаты: <b>${stats.awaitingPayment}</b>`);
+  if (stats.awaitingShipment > 0) queue.push(`Отправить: <b>${stats.awaitingShipment}</b>`);
+
   const text = [
     "<b>ТЕХНОЛАБ · панель</b>",
     "",
-    `Новых заявок: <b>${stats.newOrders}</b>`,
+    queue.length ? queue.join("\n") : "<i>Срочных дел нет — все заказы в работе.</i>",
+    "",
     `Товаров в наличии: <b>${stats.activeProducts}</b>`,
     `Выручка по выполненным: <b>${money(stats.revenueDone)}</b>`,
+    stats.paymentConfigured ? "" : "\n⚠️ <b>Оплата не настроена</b> — клиенту не придёт, куда платить.",
     "",
-    "<i>Заявка приходит в группу и сюда. Статус меняется кнопками.</i>",
-  ].join("\n");
+    "<i>/start — эта панель, /help — что умеет бот</i>",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 
-  return {
-    text,
-    keyboard: {
-      inline_keyboard: [
-        [{ text: `Заявки (${stats.newOrders})`, callback_data: "orders:new" }],
-        [
-          { text: "Товары", callback_data: "products:0" },
-          { text: "Добавить товар", callback_data: "add:new" },
-        ],
-        [
-          { text: "Покупатели", callback_data: "customers" },
-          { text: "Сводка", callback_data: "stats" },
-        ],
-        [{ text: "Открыть витрину", url: appUrl() }],
-      ],
-    },
-  };
+  const keyboard: InlineButton[][] = [
+    [{ text: `Ждут подтверждения (${stats.newOrders})`, callback_data: "orders:new" }],
+    [
+      { text: `Ждут оплаты (${stats.awaitingPayment})`, callback_data: "queue:confirmed" },
+      { text: `Отправить (${stats.awaitingShipment})`, callback_data: "queue:paid" },
+    ],
+    [
+      { text: "Товары", callback_data: "products:0" },
+      { text: "Добавить товар", callback_data: "add:new" },
+    ],
+    [{ text: "Найти заказ", callback_data: "ofind" }],
+    [
+      { text: "Покупатели", callback_data: "customers" },
+      { text: "Сводка", callback_data: "stats" },
+    ],
+    [{ text: stats.paymentConfigured ? "Оплата настроена" : "Настроить оплату", callback_data: "pay" }],
+    [{ text: "Открыть витрину", url: appUrl() }],
+  ];
+
+  return { text, keyboard: { inline_keyboard: keyboard } };
 }
 
 const STATUS_FILTERS: { key: string; label: string }[] = [
@@ -329,8 +353,22 @@ export function helpScreen(): Screen {
     "/find — поиск товара по названию или бренду",
     "",
     "<b>Заказы</b>",
-    "/orders — заказы по статусам; в карточке — статус доставки, трек-номер,",
+    "/orders — новые заявки. На главном экране три очереди: ждут подтверждения,",
+    "ждут оплаты, отправить. В карточке — статус доставки, трек-номер,",
     "комментарий клиенту и кнопка «Написать»",
+    "«Найти заказ» — поиск по номеру, телефону или имени клиента",
+    "",
+    "Путь заказа: клиент оформил → вы подтверждаете → клиент получает реквизиты →",
+    "«Оплата получена» → «Отправлено» и трек-номер → «Получено».",
+    "На каждый шаг клиенту приходит сообщение в личку.",
+    "",
+    "<b>Оплата</b>",
+    "Кнопка «Настроить оплату» на главном экране: реквизиты, ссылка на оплату,",
+    "приписка и телефон магазина. Клиент получает их вместе с подтверждением заказа.",
+    "",
+    "<b>Массовые действия</b>",
+    "Товары → «Массовые действия»: скрыть или показать всю категорию,",
+    "поднять или снизить цены категории на процент.",
     "",
     "<b>Покупатели</b>",
     "/customers — контакты, бонусный баланс, начисление и списание бонусов",

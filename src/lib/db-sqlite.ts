@@ -146,6 +146,12 @@ CREATE TABLE IF NOT EXISTS order_events (
 );
 
 -- Состояние диалога админ-бота: переживает холодный старт инстанса.
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS bot_state (
   chat_id    TEXT PRIMARY KEY,
   kind       TEXT NOT NULL,
