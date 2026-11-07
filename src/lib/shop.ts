@@ -227,12 +227,15 @@ export type CartLine = {
   variantId: string | null;
   variantLabel: string;
   basePrice: number;
+  /** Зачёркнутая цена за штуку; 0 — скидки нет. */
+  oldPrice: number;
   unitPrice: number;
   quantity: number;
   lineTotal: number;
 };
 
-export type Cart = { lines: CartLine[]; total: number; count: number };
+/** savings — сколько клиент экономит на скидках: без него старая цена бессмысленна. */
+export type Cart = { lines: CartLine[]; total: number; count: number; savings: number };
 
 type CartRow = {
   product_id: string;
@@ -241,17 +244,18 @@ type CartRow = {
   variant_id: string | null;
   variant_label: string | null;
   base_price: number | string;
+  old_price: number | string | null;
   variant_extra: number | string | null;
   quantity: number | string;
 };
 
-const emptyCart = (): Cart => ({ lines: [], total: 0, count: 0 });
+const emptyCart = (): Cart => ({ lines: [], total: 0, count: 0, savings: 0 });
 
 export async function getCart(tgUserId: string): Promise<Cart> {
   const db = await getDb();
   const rows = await db.all<CartRow>(
     `SELECT c.product_id, p.title, p.photo_url, c.variant_id,
-            v.label AS variant_label, p.price AS base_price, v.extra AS variant_extra, c.quantity
+            v.label AS variant_label, p.price AS base_price, p.old_price, v.extra AS variant_extra, c.quantity
      FROM cart_items c
      JOIN products p ON p.id = c.product_id
      LEFT JOIN product_variants v ON v.id = c.variant_id
@@ -262,7 +266,10 @@ export async function getCart(tgUserId: string): Promise<Cart> {
 
   const lines: CartLine[] = rows.map((r) => {
     const basePrice = Number(r.base_price);
-    const unitPrice = basePrice + Number(r.variant_extra ?? 0);
+    // Старая цена тоже с надбавкой варианта: иначе «экономия» поедет на её величину.
+    const extra = Number(r.variant_extra ?? 0);
+    const oldBase = Number(r.old_price ?? 0);
+    const unitPrice = basePrice + extra;
     const quantity = Number(r.quantity);
     return {
       productId: r.product_id,
@@ -271,6 +278,7 @@ export async function getCart(tgUserId: string): Promise<Cart> {
       variantId: r.variant_id,
       variantLabel: r.variant_label ?? "",
       basePrice,
+      oldPrice: oldBase > basePrice ? oldBase + extra : 0,
       unitPrice,
       quantity,
       lineTotal: unitPrice * quantity,
@@ -281,6 +289,10 @@ export async function getCart(tgUserId: string): Promise<Cart> {
     lines,
     total: lines.reduce((sum, line) => sum + line.lineTotal, 0),
     count: lines.reduce((sum, line) => sum + line.quantity, 0),
+    savings: lines.reduce(
+      (sum, line) => sum + (line.oldPrice > 0 ? (line.oldPrice - line.unitPrice) * line.quantity : 0),
+      0,
+    ),
   };
 }
 

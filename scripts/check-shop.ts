@@ -401,12 +401,49 @@ async function main() {
       `фильтр «только со скидкой» больше не пропускает всё (${discounted.length} товаров)`,
     );
 
+    // UI: фильтр «Со скидкой» реально ходит в API, а не просто висит чипом.
+    const readSource = (rel: string) => readFileSync(path.join(process.cwd(), rel), "utf8");
+    const catalogUi = readSource("src/components/shop/CatalogScreen.tsx");
+    assert(
+      catalogUi.includes('params.set("sale", "1")') &&
+        catalogUi.includes("setOnlyDiscounted") &&
+        catalogUi.includes("Со скидкой"),
+      "каталог умеет включить фильтр «Со скидкой» и отправить его в API",
+    );
+    assert(
+      catalogUi.includes("onlyDiscounted])"),
+      "смена фильтра скидок перезапрашивает каталог",
+    );
+    assert(
+      readSource("src/app/api/catalog/route.ts").includes('params.get("sale") === "1"'),
+      "API понимает параметр sale=1",
+    );
+    assert(
+      catalogUi.includes("setOnlyDiscounted(false);"),
+      "«Сбросить всё» снимает фильтр скидок",
+    );
+
     // Корзина и заказ берут price, а не oldPrice.
     const buyer = "777001";
     const cart = await shop.addToCart({ tgUserId: buyer, productId: sale!.id, quantity: 1 });
     const line = cart.lines.find((l) => l.productId === sale!.id)!;
     assert(line.unitPrice === sale!.price, "в корзину попадает цена со скидкой, а не старая");
     assert(line.basePrice === sale!.price, "базовая цена строки — актуальная");
+    // Выгода в корзине: старая цена строки, общая экономия и сходимость итога.
+    assert(line.oldPrice === sale!.oldPrice, "в строке корзины есть зачёркнутая цена товара");
+    assert(
+      cart.savings === (sale!.oldPrice - sale!.price) * line.quantity,
+      "экономия корзины = (старая − новая) × количество",
+    );
+    assert(
+      cart.total + cart.savings === sale!.oldPrice * line.quantity,
+      "«Товары» плюс «Скидка» дают ровно старую цену — на экране ничего не теряется",
+    );
+    assert(
+      cart.lines.every((l) => l.oldPrice === 0 || l.oldPrice > l.unitPrice),
+      "старая цена в корзине выше той, что платит клиент",
+    );
+
 
     // Заказ считает сумму по переданному total, а корзина — по price,
     // поэтому проверяем связку: сумма заказа равна цене со скидкой.
