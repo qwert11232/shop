@@ -228,6 +228,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Sony",
     priceRub: 54990,
     photo: "/products/ps5.webp",
+    gallery: ["/shop-photos/ps5-1.webp", "/shop-photos/ps5-2.webp", "/shop-photos/ps5-3.webp"],
     oldPriceRub: 69990,
     desc: "SSD 825 ГБ, трассировка лучей, 4K до 120 к/с. Геймпад DualSense в комплекте.",
     specs: [
@@ -311,6 +312,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Dyson",
     priceRub: 54990,
     photo: "/products/dyson-airwrap.webp",
+    gallery: ["/shop-photos/dyson-airwrap-1.webp", "/shop-photos/dyson-airwrap-2.webp", "/shop-photos/dyson-airwrap-3.webp"],
     desc: "Сушка и укладка без экстремального нагрева, насадки Coanda.",
     specs: [
       { group: "Питание", name: "Мощность", value: "1300", unit: "Вт", numeric: 1300 },
@@ -352,6 +354,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Xiaomi",
     priceRub: 3990,
     photo: "/products/xiaomi-kettle.webp",
+    gallery: ["/shop-photos/xiaomi-kettle-1.webp", "/shop-photos/xiaomi-kettle-2.webp"],
     desc: "Двойные стенки, поддержание температуры до 12 часов.",
     specs: [
       { group: "Питание", name: "Мощность", value: "1800", unit: "Вт", numeric: 1800 },
