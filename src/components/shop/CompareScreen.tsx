@@ -58,7 +58,7 @@ export default function CompareScreen(props: {
 
       {/* Горизонтальная прокрутка: две модели помещаются целиком, три — листаются */}
       <div className="mt-3 overflow-x-auto no-scrollbar border border-rule rounded-[14px]">
-        <table className="w-full border-collapse text-[12px]">
+        <table className="w-full border-collapse text-[12px] tabular-nums">
           <thead>
             <tr>
               <th className="sticky left-0 z-10 bg-paper w-[92px] min-w-[92px] border-b border-rule p-2 text-left align-bottom">
@@ -67,7 +67,7 @@ export default function CompareScreen(props: {
               {comparison.products.map((product) => (
                 <th key={product.id} className="border-b border-rule p-2 align-bottom min-w-[124px]">
                   <button onClick={() => props.onOpen(product.id)} className="block text-left w-full">
-                    <div className="aspect-square rounded-[8px] bg-[#f6f6f6] mb-1.5">
+                    <div className="photo-frame aspect-square rounded-[8px] mb-1.5">
                       <ProductImage src={product.photoUrl} alt={product.title} className="h-full w-full object-contain p-1" />
                     </div>
                     <div className="meta">{product.brand}</div>
@@ -120,7 +120,7 @@ export default function CompareScreen(props: {
 
 function Header({ onBack }: { onBack: () => void }) {
   return (
-    <header className="sticky top-0 z-20 bg-paper border-b border-ink -mx-4 px-4 py-2.5 flex items-center gap-1">
+    <header className="app-header -mx-4 px-4 py-2.5 flex items-center gap-1">
       <button className="icon-btn" onClick={onBack} aria-label="Назад">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>
           <path d="M15 5l-7 7 7 7" />

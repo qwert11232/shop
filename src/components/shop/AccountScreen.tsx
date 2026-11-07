@@ -312,7 +312,7 @@ export default function AccountScreen(props: {
       {tab === "orders" && (
         <div className="mt-3 flex flex-col gap-2.5">
           {orders.length === 0 && (
-            <div className="border border-rule rounded-[14px] py-10 text-center">
+            <div className="empty">
               <p className="text-[13px] text-ink-2">Заказов пока нет</p>
               <button className="btn-ghost mt-3" onClick={props.onCatalog}>Выбрать технику</button>
             </div>
@@ -358,7 +358,7 @@ export default function AccountScreen(props: {
 
 function Header() {
   return (
-    <header className="sticky top-0 z-20 bg-paper border-b border-ink -mx-4 px-4 py-2.5">
+    <header className="app-header -mx-4 px-4 py-2.5">
       <span className="font-display font-bold text-[15px]">Профиль</span>
     </header>
   );

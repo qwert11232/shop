@@ -34,14 +34,14 @@
 | --- | --- |
 | Проект / продукт | **ТЕХНОЛАБ** — Telegram Mini App «витрина» магазина техники; заявки уходят в группу |
 | Ветка по умолчанию | `main` |
-| Рабочая ветка агента | `arena/95219020-shop` (HEAD `ae82867`, открытый PR) |
+| Рабочая ветка агента | `arena/95219020-shop` (открытый PR #5) |
 | Дизайн | три цвета: `paper #fff` / `ink #0a0a0a` / `signal #e00b20`; Manrope 400–700; SVG-иконки `src/components/icons.tsx`; `docs/DESIGN.md` |
 | Стек | TypeScript, Next.js 15 (App Router), React 19, Tailwind v4; БД по `DATABASE_URL`: SQLite (better-sqlite3) / PostgreSQL (pg); фото — S3-совместимое хранилище или `public/uploads/`; Vercel |
 | Точка входа | `src/app/page.tsx` (витрина), `src/app/admin/page.tsx` (панель владельца), `/api/health` (диагностика) |
 | Команда запуска | `npm run dev` (после `npm run db:seed`) |
 | Команды проверок | `npm run check` (lint + typecheck + check:storage + check:pg + check:bot + check:shop), `npm run build`, `npm run db:seed` |
 | Переменные окружения | `.env.example`: AUTO_SEED, ADMIN_TELEGRAM_IDS, ADMIN_TELEGRAM_USERNAMES, BOT_WEBHOOK_SECRET, BOT_SETUP_TOKEN, DATABASE_URL, PGPOOL_MAX, S3_BUCKET/S3_REGION/S3_ENDPOINT/S3_PUBLIC_BASE_URL/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY, BOT_TOKEN, GROUP_CHAT_ID, OWNER_TELEGRAM_ID, WEBAPP_URL, ALLOW_DEV_NO_AUTH, DEV_NO_AUTH_HOSTS |
-| Статус проверок | PASS 2026-11-05: `npm run check` (check:bot 209, check:shop 60, check:pg, check:storage), lint 0, typecheck, build 8.3 с; смоук живого вебхука (оплата, очереди, массовые действия); см. Шаг 10 |
+| Статус проверок | PASS 2026-11-05: `npm run check` (check:bot 209, check:shop 108, check:pg, check:storage), lint 0, typecheck, build 8.3 с; смоук живого вебхука (оплата, очереди, массовые действия); см. Шаг 10 |
 
 ### Что работает сейчас
 
@@ -97,6 +97,16 @@
 ---
 
 ## 3. ARGUMENTATION LOG — почему сделано именно так
+
+### Шаг 11: Аудит визуала скиллами и редизайн каталога (2026-11-07)
+- Контекст: владелец сказал, что текущая версия «не нравится», и попросил анализ скиллов с дизайном, точки роста, аудит и пару вариантов глобального улучшения.
+- Решение: прогнан `avoid-ai-design detect` (7 находок, все — ложные), прочитан `Anti-AI-Slop` (5 осей), и главное — **впервые сняты реальные скриншоты** (headless Chromium из `@sparticuz/chromium`, npm-пакет несёт бинарь; системные CDN в песочнице закрыты). Аудит: `docs/DESIGN-AUDIT.md`. Выбранный вариант — гибрид: A «Коллекция» на первый экран, B «Каталог-табло» для сетки.
+- Сделано: все компонентные классы в `@layer components` (чинит перебивание `pl-9`), шкала `.t-*` (цена 18px/800 vs название 13.5px/650), `.photo-frame` (единая подложка, кадр на всю плитку), `.shelf` (сетка-полотно, линии через gap), `.spotlight` (акцентный блок), `.tab` вместо чипов, `.empty` с иконкой, `.edge-fade`, `.app-header` с rule вместо ink. Хиро — самый дорогой товар, из сетки исключён (`hero` + `shelfProducts`).
+- Альтернативы: только A — мало товара на первом экране; только B — технично, без эмоции; оставить как есть — отклонено владельцем.
+- Риски: `object-cover` на фото товаров обрезает кадры (MacBook без клавиатуры) — поэтому в сетке и хиро `object-contain` на подложке; зачёркнутые цены (скидки) не реализованы — нет поля `oldPrice` в БД; затухание `.edge-fade` на длинных лентах может скрывать скроллбар.
+- Найденные баги: (1) `.input` вне `@layer` перебивал `pl-9` — иконка поиска налезала на плейсхолдер (замер: padding-left 11.2px вместо 36); (2) шапки отделялись линией `ink` — самой контрастной на экране; (3) плейсхолдер фото не совпадал с кадром.
+- Проверка: 16 ассертов дизайн-инвариантов в `check:shop` (слой CSS, шкала, подложка, отсутствие `<select>`, `pl-11`), `check:bot` 209, `check:pg`, `check:storage`, lint 0, typecheck, build 8.6 с.
+- Окружение: рабочее дерево в начале сессии откатилось на `cade472` (коммиты и `node_modules` пропали) — восстановлено `git fetch` + `update-ref` на `01d6b48`, зависимости `npm install --ignore-scripts` + `npm rebuild better-sqlite3` с `npm_config_nodedir=/usr/local`. Удалять `.next` при работающем `next dev` нельзя: сервер падает с ENOENT на routes-manifest.
 
 ### Шаг 10: Очереди, приём оплаты, поиск заказа, массовые действия (2026-11-05)
 - Контекст: владелец просил четыре вещи «плюс логику и оформление, чтобы было интуитивно понятно»: реквизиты/ссылка оплаты клиенту, главный экран со счётчиками, поиск заказа и телефон в один тап, массовые действия по категориям.

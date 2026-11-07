@@ -77,7 +77,7 @@ export default function FavoritesScreen(props: {
 
   return (
     <div className="px-4 pb-6">
-      <header className="sticky top-0 z-20 bg-paper border-b border-ink -mx-4 px-4 py-2.5">
+      <header className="app-header -mx-4 px-4 py-2.5">
         <span className="font-display font-bold text-[15px]">
           Избранное{products.length ? ` · ${products.length}` : ""}
         </span>
@@ -93,9 +93,16 @@ export default function FavoritesScreen(props: {
       )}
 
       {!loading && !error && products.length === 0 && (
-        <div className="border border-rule rounded-[14px] py-12 text-center mt-4">
-          <p className="text-[14px] font-semibold">Пока пусто</p>
-          <p className="meta mt-1">Сердечко в карточке товара сохранит его здесь</p>
+        <div className="empty mt-4">
+          <div className="empty-icon" aria-hidden>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20s-7.5-4.6-7.5-9.4A4.1 4.1 0 0112 8.2a4.1 4.1 0 017.5 2.4C19.5 15.4 12 20 12 20z" />
+            </svg>
+          </div>
+          <p className="t-section">Пока пусто</p>
+          <p className="meta mt-1.5 max-w-[26ch] mx-auto">
+            Сердечко в карточке товара сохранит его здесь — список не потеряется при закрытии
+          </p>
         </div>
       )}
 
@@ -104,20 +111,20 @@ export default function FavoritesScreen(props: {
           <li key={product.id} className="border border-rule rounded-[14px] p-2.5 flex gap-2.5">
             <button
               onClick={() => props.onOpen(product.id)}
-              className="h-[68px] w-[68px] shrink-0 rounded-[10px] bg-[#f6f6f6]"
+              className="photo-frame h-[68px] w-[68px] shrink-0 rounded-[8px]"
               aria-label={`Открыть ${product.title}`}
             >
               <ProductImage src={product.photoUrl} alt={product.title} className="h-full w-full object-contain p-1" />
             </button>
             <div className="flex-1 min-w-0">
-              {product.brand && <div className="meta">{product.brand}</div>}
+              {product.brand && <div className="t-brand">{product.brand}</div>}
               <button
                 onClick={() => props.onOpen(product.id)}
-                className="text-[13px] font-semibold leading-snug line-clamp-2 text-left"
+                className="t-title line-clamp-2 text-left"
               >
                 {product.title}
               </button>
-              <div className="price text-[14px] mt-1">{money(product.price)}</div>
+              <div className="price t-price mt-1">{money(product.price)}</div>
             </div>
             <div className="flex flex-col gap-1 items-end justify-between">
               <button

@@ -6,7 +6,7 @@
  * Проверяем поведение функций, которые вызывают API-роуты: если логика
  * сломается, здесь это видно до деплоя.
  */
-import { existsSync, mkdtempSync, rmSync, statSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 
@@ -298,6 +298,54 @@ async function main() {
   const totalKb = Math.round(sizes.reduce((a, b) => a + b, 0) / 1024);
   assert(Math.max(...sizes) < 200 * 1024, `самое тяжёлое фото меньше 200 КБ (${Math.round(Math.max(...sizes) / 1024)} КБ)`);
   assert(totalKb < 900, `весь каталог фото меньше 900 КБ (${totalKb} КБ)`);
+
+  // ── Дизайн-инварианты ────────────────────────────────────────────────────
+  // Регрессии вёрстки не видны в логике, поэтому проверяем то, что можно
+  // проверить без браузера: слой CSS, единую подложку фото и шкалу кеглей.
+  const css = readFileSync(path.join(process.cwd(), "src", "app", "globals.css"), "utf8");
+  assert(
+    /@layer components\s*\{[\s\S]*\.input\s*\{/.test(css),
+    "компонентные классы лежат в @layer components (иначе .input перебивает утилиты Tailwind)",
+  );
+  assert(css.includes(".photo-frame"), "есть единая подложка фото (кадры разной светлоты не проваливаются)");
+  assert(
+    /\.photo-frame\s*>\s*img\s*\{[\s\S]*?height:\s*100%/.test(css),
+    "фото занимает всю плитку, а не висит в углу на сером фоне",
+  );
+  for (const cls of [".t-price-lg", ".t-price", ".t-title", ".t-brand", ".t-section"]) {
+    assert(css.includes(cls), `шкала типографики содержит ${cls}`);
+  }
+  const priceTokens = [...css.matchAll(/\.t-price-lg\s*\{[\s\S]*?font-size:\s*([\d.]+)px/g)].map((m) => Number(m[1]));
+  assert(
+    priceTokens.length > 0 && priceTokens[0] >= 17,
+    `цена крупнее названия: ${priceTokens[0]}px против 13.5px у .t-title`,
+  );
+  assert(css.includes(".edge-fade"), "у горизонтальных лент есть затухание по краю");
+
+  const catalogSrc = readFileSync(
+    path.join(process.cwd(), "src", "components", "shop", "CatalogScreen.tsx"),
+    "utf8",
+  );
+  // Регрессия: иконка поиска налезала на плейсхолдер, пока .input перебивал pl-9.
+  assert(catalogSrc.includes('className="input pl-11"'), "у поиска отступ слева под иконку (pl-11)");
+  assert(catalogSrc.includes('className="shelf'), "каталог собран в сетку-полотно, а не 17 отдельных рамок");
+  assert(
+    catalogSrc.includes("const hero = useMemo") && catalogSrc.includes("shelfProducts"),
+    "акцентный товар не дублируется в сетке (hero и shelfProducts)",
+  );
+  assert(catalogSrc.includes("tab "), "категории — табы с подчёркиванием, а не плашки-чипы");
+  // Комментарий «раньше здесь жил <select>» — не код: ищем реальный тег.
+  assert(
+    !/<select[\s>]/.test(catalogSrc),
+    "сортировка не через <select> (на iOS он выглядит как поле ввода)",
+  );
+
+  const cartSrc = readFileSync(path.join(process.cwd(), "src", "components", "shop", "CartScreen.tsx"), "utf8");
+  assert(cartSrc.includes('className="empty mt-4"'), "пустая корзина — блок с иконкой и объяснением, а не пустая рамка");
+  assert(
+    !cartSrc.includes("border-b border-ink"),
+    "шапки экранов не отделяются самой контрастной линией на экране",
+  );
 
   rmSync(dir, { recursive: true, force: true });
   console.log("[check:shop] PASS — фильтры, карточка, корзина, заказ, бонусы, отзывы, избранное и сравнение работают");
