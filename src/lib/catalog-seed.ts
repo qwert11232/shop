@@ -33,6 +33,11 @@ export type SeedProduct = {
   brand: string;
   priceRub: number;
   photo: string;
+  /**
+   * Старая цена для витрины (в рублях). Задаётся только у демо-товаров со
+   * скидкой: сид не трогает цену существующего товара — её ведёт владелец.
+   */
+  oldPriceRub?: number;
   desc: string;
   /** Дополнительные кадры галереи (первый — основной photo). */
   gallery?: string[];
@@ -58,6 +63,8 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Apple",
     priceRub: 89990,
     photo: "/products/iphone-16-pro.webp",
+    gallery: ["/shop-photos/iphone-16-pro-1.webp", "/shop-photos/iphone-16-pro-2.webp", "/shop-photos/iphone-16-pro-3.webp"],
+    oldPriceRub: 99990,
     desc: "Титановый корпус, чип A18 Pro, тройная камера 48 Мп, Ceramic Shield.",
     specs: [
       { group: "Экран", name: "Диагональ", value: "6,3", unit: "″", numeric: 6.3 },
@@ -85,6 +92,8 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Samsung",
     priceRub: 94990,
     photo: "/products/galaxy-s24-ultra.webp",
+    gallery: ["/shop-photos/galaxy-s24-ultra-1.webp", "/shop-photos/galaxy-s24-ultra-2.webp", "/shop-photos/galaxy-s24-ultra-3.webp"],
+    oldPriceRub: 114990,
     desc: "AMOLED 6,8″ 120 Гц, Snapdragon 8 Gen 3, S Pen в комплекте, камера 200 Мп.",
     specs: [
       { group: "Экран", name: "Диагональ", value: "6,8", unit: "″", numeric: 6.8 },
@@ -108,6 +117,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Apple",
     priceRub: 189990,
     photo: "/products/macbook-pro-14.webp",
+    gallery: ["/shop-photos/macbook-pro-14-1.webp", "/shop-photos/macbook-pro-14-2.webp", "/shop-photos/macbook-pro-14-3.webp"],
     desc: "Чип Apple M4, 16 ГБ памяти, Liquid Retina XDR 120 Гц, до 18 часов работы.",
     specs: [
       { group: "Экран", name: "Диагональ", value: "14,2", unit: "″", numeric: 14.2 },
@@ -152,6 +162,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Apple",
     priceRub: 24990,
     photo: "/products/airpods-pro-2.webp",
+    oldPriceRub: 26990,
     desc: "Активное шумоподавление, чип H2, до 30 часов с кейсом, защита IP54.",
     specs: [
       { group: "Звук", name: "Шумоподавление", value: "активное" },
@@ -217,6 +228,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Sony",
     priceRub: 54990,
     photo: "/products/ps5.webp",
+    oldPriceRub: 69990,
     desc: "SSD 825 ГБ, трассировка лучей, 4K до 120 к/с. Геймпад DualSense в комплекте.",
     specs: [
       { group: "Память", name: "SSD", value: "825", unit: "ГБ", numeric: 825 },
@@ -235,6 +247,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Sony",
     priceRub: 6990,
     photo: "/products/dualsense.webp",
+    oldPriceRub: 7990,
     desc: "Адаптивные курки, HD-вибрация, до 10 часов автономности.",
     specs: [
       { group: "Питание", name: "Автономность", value: "до 10", unit: "ч", numeric: 10 },

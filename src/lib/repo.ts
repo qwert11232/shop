@@ -18,6 +18,12 @@ export type Product = {
   title: string;
   description: string;
   price: number;
+  /**
+   * Старая цена в копейках для витрины; 0 — скидки нет.
+   * `price` всегда актуальная: корзина и заказы считаются по ней,
+   * поэтому скидка не может «потеряться» в момент оформления.
+   */
+  oldPrice: number;
   photoUrl: string;
   isActive: boolean;
   createdAt: string;
@@ -50,7 +56,7 @@ type CategoryRow = {
 type ProductRow = {
   id: string; title: string; description: string; price: number; photo_url: string;
   is_active: boolean | number; created_at: string; category_id: string;
-  brand?: string | null;
+  brand?: string | null; old_price?: number | string | null;
 };
 type OrderRow = {
   id: string; status: string; comment: string; tg_user_id: string | null; first_name: string | null;
@@ -65,7 +71,8 @@ const cat = (r: CategoryRow): Category => ({
   isActive: Boolean(r.is_active), createdAt: String(r.created_at),
 });
 const prod = (r: ProductRow): Product => ({
-  id: r.id, title: r.title, description: r.description, price: Number(r.price), photoUrl: r.photo_url,
+  id: r.id, title: r.title, description: r.description, price: Number(r.price),
+  oldPrice: Number(r.old_price ?? 0), photoUrl: r.photo_url,
   isActive: Boolean(r.is_active), createdAt: String(r.created_at), categoryId: r.category_id,
   // Бренд читается из той же строки: без него фильтр и панель видят пустое поле,
   // хотя в базе значение есть.
@@ -148,6 +155,8 @@ export async function createProduct(input: {
   title: string;
   description?: string;
   priceKopecks: number;
+  /** Старая цена в копейках; 0 — снять скидку. */
+  oldPriceKopecks?: number;
   photoUrl?: string;
   categoryId: string;
   brand?: string;
@@ -155,12 +164,14 @@ export async function createProduct(input: {
   const db = await getDb();
   const id = uid();
   await db.run(
-    "INSERT INTO products (id, title, description, price, photo_url, category_id, brand) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    `INSERT INTO products (id, title, description, price, old_price, photo_url, category_id, brand)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.title,
       input.description ?? "",
       input.priceKopecks,
+      input.oldPriceKopecks ?? 0,
       input.photoUrl ?? "",
       input.categoryId,
       input.brand ?? "",
@@ -544,6 +555,8 @@ export async function updateProduct(
   patch: {
     title?: string;
     priceKopecks?: number;
+    /** Старая цена в копейках для витрины; 0 — снять скидку. */
+    oldPriceKopecks?: number;
     photoUrl?: string;
     isActive?: boolean;
     brand?: string;
@@ -557,6 +570,7 @@ export async function updateProduct(
   const next = {
     title: patch.title ?? current.title,
     price: patch.priceKopecks ?? current.price,
+    oldPrice: patch.oldPriceKopecks ?? current.oldPrice,
     photoUrl: patch.photoUrl ?? current.photoUrl,
     isActive: patch.isActive ?? current.isActive,
     brand: patch.brand ?? null,
@@ -564,10 +578,20 @@ export async function updateProduct(
     categoryId: patch.categoryId ?? null,
   };
   await db.run(
-    `UPDATE products SET title = ?, price = ?, photo_url = ?, is_active = ?,
+    `UPDATE products SET title = ?, price = ?, old_price = ?, photo_url = ?, is_active = ?,
        brand = COALESCE(?, brand), description = COALESCE(?, description), category_id = COALESCE(?, category_id)
      WHERE id = ?`,
-    [next.title, next.price, next.photoUrl, next.isActive, next.brand, next.description, next.categoryId, id],
+    [
+      next.title,
+      next.price,
+      next.oldPrice,
+      next.photoUrl,
+      next.isActive,
+      next.brand,
+      next.description,
+      next.categoryId,
+      id,
+    ],
   );
   return getProduct(id);
 }

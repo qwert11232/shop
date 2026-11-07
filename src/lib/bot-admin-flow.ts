@@ -166,6 +166,31 @@ export async function applyProductField(
   if (!product) return { ok: false, error: "Товар не найден — возможно, его удалили." };
 
   switch (field) {
+    case "sale": {
+      // Скидка задаётся «цена которую видит клиент + старая цена», но владельцу
+      // проще думать про процент. Принимаем и процент, и старую цену:
+      // «10%» — скидка от текущей цены, «109990» — старая цена.
+      const raw = text.replace(/[\s\u00a0]/g, "");
+      const percentMatch = /^(\d{1,2})%?$/.exec(raw);
+      if (percentMatch) {
+        const percent = Number(percentMatch[1]);
+        if (percent === 0) {
+          const cleared = await updateProduct(productId, { oldPriceKopecks: 0, priceKopecks: product.price });
+          return cleared ? { ok: true, product: cleared } : { ok: false, error: "Не удалось снять скидку." };
+        }
+        if (percent > 50) return { ok: false, error: "Максимальная скидка — 50%." };
+        const oldPrice = Math.round(product.price / (1 - percent / 100) / 100) * 100;
+        const updated = await updateProduct(productId, { oldPriceKopecks: oldPrice });
+        return updated ? { ok: true, product: updated } : { ok: false, error: "Не удалось сохранить скидку." };
+      }
+      const oldPrice = parsePriceRub(text);
+      if (oldPrice === null) return { ok: false, error: "Пришлите процент (например, 10%) или старую цену в рублях." };
+      if (oldPrice <= product.price) {
+        return { ok: false, error: "Старая цена должна быть выше текущей. Пришлите число больше текущей цены." };
+      }
+      const updated = await updateProduct(productId, { oldPriceKopecks: oldPrice });
+      return updated ? { ok: true, product: updated } : { ok: false, error: "Не удалось сохранить скидку." };
+    }
     case "price": {
       const price = parsePriceRub(text);
       if (price === null) return { ok: false, error: "Нужна цена в рублях: целое число больше нуля." };

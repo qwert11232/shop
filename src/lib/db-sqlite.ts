@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS products (
   description TEXT NOT NULL DEFAULT '',
   price       INTEGER NOT NULL,          -- копейки
   photo_url   TEXT NOT NULL,
+  -- Старая цена для витрины: price — то, что платит клиент. Так корзина,
+  -- заказы и бот работают с одной актуальной ценой, а скидка живёт только
+  -- в показе. 0 — скидки нет.
+  old_price   INTEGER NOT NULL DEFAULT 0,
   is_active   INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   category_id TEXT NOT NULL REFERENCES categories(id)
@@ -192,6 +196,7 @@ function migrateSqlite(db: Database.Database): void {
   ensure("orders", "contact_name", "TEXT NOT NULL DEFAULT ''");
   ensure("orders", "contact_phone", "TEXT NOT NULL DEFAULT ''");
   ensure("products", "brand", "TEXT NOT NULL DEFAULT ''");
+  ensure("products", "old_price", "INTEGER NOT NULL DEFAULT 0");
 }
 
 export function createSqliteDb(file: string): Db {

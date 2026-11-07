@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiHeaders, haptic } from "@/lib/telegram-webapp";
 import { money, plural, shortDate } from "@/lib/format";
 import ProductImage from "@/components/ui/ProductImage";
+import { hasDiscount } from "@/lib/price";
 
 type Variant = { id: string; label: string; kind: string; extra: number };
 type Spec = { group: string; name: string; value: string; unit: string; numeric: number | null };
@@ -14,6 +15,8 @@ type Product = {
   title: string;
   description: string;
   price: number;
+  /** Старая цена для витрины; 0 — скидки нет. */
+  oldPrice?: number;
   photoUrl: string;
   brand: string;
   variants: Variant[];
@@ -264,7 +267,7 @@ export default function ProductScreen(props: {
               </div>
             ) : (
               <div key={`${item.url}-${index}`} className="min-w-full snap-center aspect-square flex items-center justify-center">
-                <ProductImage src={item.url} alt={`${product.title} — фото ${index + 1}`} priority={index === galleryIndex} className="h-full w-full object-contain p-6" wrapperClassName="h-full w-full" />
+                <ProductImage src={item.url} alt={`${product.title} — фото ${index + 1}`} priority={index === galleryIndex} className="h-full w-full object-cover" wrapperClassName="h-full w-full" />
               </div>
             ),
           )}
@@ -286,6 +289,9 @@ export default function ProductScreen(props: {
         <h1 className="font-display font-bold text-[19px] leading-tight tracking-[-0.025em] mt-1">{product.title}</h1>
         <div className="flex items-baseline gap-2 mt-2">
           <span className="price text-[26px] leading-none">{money(total)}</span>
+          {hasDiscount(product) && chosenExtra === 0 && (
+            <span className="price-old !text-[13px]">{money(product.oldPrice!)}</span>
+          )}
           {chosenExtra !== 0 && <span className="meta">базовая {money(product.price)}</span>}
         </div>
         {product.rating !== null && (

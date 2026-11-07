@@ -29,7 +29,15 @@ export async function GET(req: NextRequest) {
 
     // Характеристики товаров нужны фильтру по spec — берём одним запросом.
     const specs = await listSpecMap();
-    const withSpecs = products.map((p) => ({ ...p, specs: specs[p.id] ?? {} }));
+    // Кадры для карусели прямо в сетке: без них пришлось бы делать запрос
+    // на каждую карточку. Ограничение в 4 кадра — компромисс между
+    // «полистать в списке» и весом ответа.
+    const media = await listMediaMap();
+    const withSpecs = products.map((p) => ({
+      ...p,
+      specs: specs[p.id] ?? {},
+      photos: (media[p.id] ?? []).slice(0, 4),
+    }));
     const filtered = applyFilters(withSpecs, filters);
 
     return NextResponse.json({
@@ -75,6 +83,20 @@ function parseFilters(params: URLSearchParams): CatalogFilters {
     specs: Object.keys(specMap).length ? specMap : undefined,
     sort: allowed.includes(sort as (typeof allowed)[number]) ? (sort as CatalogFilters["sort"]) : undefined,
   };
+}
+
+/** Первые кадры галереи по каждому товару, в порядке sort_order. */
+async function listMediaMap(): Promise<Record<string, string[]>> {
+  const { getDb } = await import("@/lib/db");
+  const db = await getDb();
+  const rows = await db.all<{ product_id: string; url: string }>(
+    "SELECT product_id, url FROM product_media WHERE kind = 'image' ORDER BY product_id, sort_order ASC",
+  );
+  const map: Record<string, string[]> = {};
+  for (const row of rows) {
+    map[row.product_id] = [...(map[row.product_id] ?? []), row.url];
+  }
+  return map;
 }
 
 async function listSpecMap(): Promise<Record<string, Record<string, string>>> {

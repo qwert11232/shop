@@ -78,7 +78,9 @@ export function productAdminScreen(product: Product & { categoryName?: string | 
   const brand = product.brand ?? "";
   const text = [
     `<b>${esc(product.title)}</b>`,
-    `Цена: <b>${money(product.price)}</b>`,
+    product.oldPrice > product.price
+      ? `Цена: <b>${money(product.price)}</b>  <s>${money(product.oldPrice)}</s>`
+      : `Цена: <b>${money(product.price)}</b>`,
     `Бренд: ${brand ? esc(brand) : "<i>не указан</i>"}`,
     `Категория: ${esc(product.categoryName ?? "—")}`,
     `Статус: ${product.isActive ? "на витрине" : "<i>скрыт</i>"}`,
@@ -92,6 +94,14 @@ export function productAdminScreen(product: Product & { categoryName?: string | 
         [
           { text: "Название", callback_data: `edit:${product.id}:title` },
           { text: "Цена", callback_data: `edit:${product.id}:price` },
+        ],
+        // Скидка живёт здесь же, рядом с ценой: владелец ищет её там, где
+        // принимает решение о цене, а не в отдельном разделе.
+        [
+          {
+            text: product.oldPrice > product.price ? `Скидка −${Math.round((1 - product.price / product.oldPrice) * 100)}%` : "Скидка",
+            callback_data: `edit:${product.id}:sale`,
+          },
         ],
         [
           { text: "Фото", callback_data: `edit:${product.id}:photo` },

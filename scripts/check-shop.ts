@@ -27,6 +27,8 @@ async function main() {
   const shop = await import("../src/lib/shop");
   const reviews = await import("../src/lib/reviews");
   const seed = await import("../src/lib/seed");
+  const repo = await import("../src/lib/repo");
+  const { applyFilters } = await import("../src/lib/catalog");
 
   // seedCatalog наполняет и товары, и варианты/спеки/галерею — отдельный вызов не нужен.
   await seed.seedCatalog();
@@ -112,22 +114,36 @@ async function main() {
     "итоговая цена складывается из базовой и надбавки варианта",
   );
 
-  // Галерея и видео: механика проверяется на кадрах, добавленных владельцем,
-  // потому что в сиде у каждого товара честно одно фото.
+  // Галерея и видео: механика проверяется на кадре, добавленном владельцем.
+  // Раньше здесь было жёсткое «ровно 3 кадра» — теперь у демо-товаров есть
+  // живые фото с прилавка, и число кадров в сиде не константа. Проверяем
+  // прирост и порядок, а не конкретное количество.
   {
     const { getDb } = await import("../src/lib/db");
     const db = await getDb();
+    const before = detail!.gallery.length;
     await db.run(
       "INSERT INTO product_media (id, product_id, kind, url, sort_order) VALUES (?, ?, ?, ?, ?)",
-      ["media-test-1", target.id, "image", "/products/ps5.png", 5],
+      ["media-test-1", target.id, "image", "/products/ps5.png", 50],
     );
     await db.run(
       "INSERT INTO product_media (id, product_id, kind, url, sort_order) VALUES (?, ?, ?, ?, ?)",
-      ["media-test-2", target.id, "video", "https://example.com/demo.mp4", 6],
+      ["media-test-2", target.id, "video", "https://example.com/demo.mp4", 60],
     );
     const withMedia = await catalog.getProductDetail(target.id);
-    assert((withMedia?.gallery.length ?? 0) === 3, "в галерею попадают все кадры товара, включая добавленные");
-    assert(withMedia?.gallery[1] === "/products/ps5.png", "кадры идут в заданном порядке");
+    // Галерея хранит кадры и видео одним списком — так её и листает карточка.
+    assert(
+      (withMedia?.gallery.length ?? 0) === before + 2,
+      `галерея принимает кадр и видео владельца (${before} → ${withMedia?.gallery.length})`,
+    );
+    assert(
+      withMedia?.gallery.includes("/products/ps5.png") === true,
+      "кадр владельца попадает в галерею",
+    );
+    assert(
+      withMedia?.gallery[withMedia.gallery.length - 2] === "/products/ps5.png",
+      "кадры идут в заданном порядке: кадр раньше видео с большим sort_order",
+    );
     assert(
       withMedia?.media.some((m) => m.kind === "video") === true,
       "видео в галерее помечено типом — карточка вставит плеер, а не картинку",
@@ -329,9 +345,24 @@ async function main() {
   // Регрессия: иконка поиска налезала на плейсхолдер, пока .input перебивал pl-9.
   assert(catalogSrc.includes('className="input pl-11"'), "у поиска отступ слева под иконку (pl-11)");
   assert(catalogSrc.includes('className="shelf'), "каталог собран в сетку-полотно, а не 17 отдельных рамок");
+  // Акцентный блок «Выбор покупателей» убран по требованию владельца:
+  // на его месте лента новинок, и товар не должен стоять на экране дважды.
   assert(
-    catalogSrc.includes("const hero = useMemo") && catalogSrc.includes("shelfProducts"),
-    "акцентный товар не дублируется в сетке (hero и shelfProducts)",
+    !catalogSrc.includes("Выбор покупателей"),
+    "на витрине нет акцентного блока «Выбор покупателей»",
+  );
+  assert(catalogSrc.includes("Новое в магазине"), "вместо него лента новинок");
+  assert(
+    catalogSrc.includes("news-rail") && catalogSrc.includes("!category && !search"),
+    "лента новинок видна в общем каталоге и не мешает внутри раздела",
+  );
+  assert(
+    catalogSrc.includes("PhotoCarousel"),
+    "у карточки в сетке есть карусель кадров",
+  );
+  assert(
+    catalogSrc.includes("discount-badge") && catalogSrc.includes("hasDiscount"),
+    "скидка показывается бейджем на фото, а не в строке цены",
   );
   assert(catalogSrc.includes("tab "), "категории — табы с подчёркиванием, а не плашки-чипы");
   // Комментарий «раньше здесь жил <select>» — не код: ищем реальный тег.
@@ -346,6 +377,76 @@ async function main() {
     !cartSrc.includes("border-b border-ink"),
     "шапки экранов не отделяются самой контрастной линией на экране",
   );
+
+  // ── Скидки ───────────────────────────────────────────────────────────────
+  // Модель: price — сколько платит клиент, oldPrice — зачёркнутая цена.
+  // Корзина считается по price, поэтому скидка не может «потеряться»
+  // в оформлении — это и проверяем.
+  {
+    const price = await import("../src/lib/price");
+    const sale = products.find((p) => p.oldPrice > 0 && p.oldPrice > p.price);
+    assert(Boolean(sale), `в каталоге есть товар со скидкой (${sale?.title ?? "нет"})`);
+    assert(price.hasDiscount(sale!) === true, "скидка распознаётся по старой цене");
+    assert(
+      price.discountPercent(sale!) === Math.round((1 - sale!.price / sale!.oldPrice) * 100),
+      `процент скидки считается от старой цены (−${price.discountPercent(sale!)}%)`,
+    );
+    assert(price.savings(sale!) === sale!.oldPrice - sale!.price, "выгода = старая цена минус новая");
+    assert(price.hasDiscount({ price: 1000, oldPrice: 500 }) === false, "старая цена ниже новой — не скидка");
+    assert(price.discountPercent({ price: 1000, oldPrice: 0 }) === 0, "без старой цены процента нет");
+
+    const discounted = applyFilters(products, { onlyDiscounted: true });
+    assert(
+      discounted.length > 0 && discounted.every((p) => p.oldPrice > p.price),
+      `фильтр «только со скидкой» больше не пропускает всё (${discounted.length} товаров)`,
+    );
+
+    // Корзина и заказ берут price, а не oldPrice.
+    const buyer = "777001";
+    const cart = await shop.addToCart({ tgUserId: buyer, productId: sale!.id, quantity: 1 });
+    const line = cart.lines.find((l) => l.productId === sale!.id)!;
+    assert(line.unitPrice === sale!.price, "в корзину попадает цена со скидкой, а не старая");
+    assert(line.basePrice === sale!.price, "базовая цена строки — актуальная");
+
+    // Заказ считает сумму по переданному total, а корзина — по price,
+    // поэтому проверяем связку: сумма заказа равна цене со скидкой.
+    const order = await shop.createPurchaseOrder({
+      tgUserId: buyer,
+      contactName: "Тест",
+      contactPhone: "+79000000000",
+      total: cart.total,
+      items: cart.lines.map((l) => ({ productId: l.productId, variantId: l.variantId, quantity: l.quantity })),
+    });
+    assert(
+      order.total === sale!.price,
+      `итог заказа считается по цене со скидкой (${order.total / 100} ₽)`,
+    );
+
+    // Владелец загрузил свой кадр — сид не подмешивает демо-фото.
+    {
+      const { getDb } = await import("../src/lib/db");
+      const db = await getDb();
+      await db.run("DELETE FROM product_media WHERE product_id = ?", [sale!.id]);
+      await db.run(
+        "INSERT INTO product_media (id, product_id, kind, url, sort_order) VALUES (?, ?, ?, ?, ?)",
+        ["owner-shot-1", sale!.id, "image", "/uploads/owner-photo.webp", 0],
+      );
+      await seed.seedCatalog();
+      const rows = await db.all<{ url: string }>(
+        "SELECT url FROM product_media WHERE product_id = ? ORDER BY sort_order",
+        [sale!.id],
+      );
+      assert(
+        rows.length === 1 && rows[0].url === "/uploads/owner-photo.webp",
+        "кадр, загруженный владельцем, не перемешивается с демо-фото",
+      );
+    }
+
+    // Снятие скидки возвращает товар в обычное состояние.
+    const cleared = await repo.updateProduct(sale!.id, { oldPriceKopecks: 0 });
+    assert(cleared?.oldPrice === 0, "скидку можно снять (old_price = 0)");
+    assert(price.hasDiscount(cleared!) === false, "после снятия скидки товар обычный");
+  }
 
   rmSync(dir, { recursive: true, force: true });
   console.log("[check:shop] PASS — фильтры, карточка, корзина, заказ, бонусы, отзывы, избранное и сравнение работают");

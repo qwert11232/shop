@@ -1,5 +1,8 @@
 import { getDb } from "./db";
 import type { Product } from "./repo";
+// Функции скидки — в отдельном модуле: их импортирует и клиент, а этот файл
+// тянет за собой драйвер БД.
+import { hasDiscount } from "./price";
 
 /**
  * Каталог для витрины: детальная карточка, фильтры по характеристикам,
@@ -69,6 +72,7 @@ type ProductRow = {
   created_at: string;
   category_id: string;
   brand: string | null;
+  old_price?: number | string | null;
 };
 
 const toProduct = (r: ProductRow): Product & { brand: string } => ({
@@ -76,6 +80,7 @@ const toProduct = (r: ProductRow): Product & { brand: string } => ({
   title: r.title,
   description: r.description,
   price: Number(r.price),
+  oldPrice: Number(r.old_price ?? 0),
   photoUrl: r.photo_url,
   isActive: Boolean(r.is_active),
   createdAt: String(r.created_at),
@@ -167,7 +172,9 @@ export function applyFilters<
     return true;
   });
 
-  if (filters.onlyDiscounted) result = result.filter((p) => p.price < 0 || true);
+  // Раньше здесь стояло `p.price < 0 || true` — фильтр пропускал всё.
+  // Скидка есть, когда старая цена задана и выше текущей.
+  if (filters.onlyDiscounted) result = result.filter((p) => hasDiscount(p));
 
   switch (filters.sort) {
     case "price-asc":

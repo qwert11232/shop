@@ -498,6 +498,50 @@ async function main() {
     "в экране оплаты можно изменить ссылку",
   );
 
+  // ── Скидка через бота ────────────────────────────────────────────────────
+  // Владелец думает процентом, а не старой ценой: присылает «10» — бот
+  // выставляет зачёркнутую цену так, чтобы скидка была ровно 10%.
+  {
+    const saleTarget = (await repo.listProductsAdmin()).find((p) => p.isActive)!;
+    const basePrice = saleTarget.price;
+    const byPercent = await flow.applyProductField(saleTarget.id, "sale", "10");
+    assert(byPercent.ok, "скидку можно задать процентом");
+    assert(
+      byPercent.product!.oldPrice > byPercent.product!.price,
+      `после «10» появилась старая цена (${byPercent.product!.oldPrice / 100} ₽ при ${basePrice / 100} ₽)`,
+    );
+    const shownPercent = Math.round(
+      (1 - byPercent.product!.price / byPercent.product!.oldPrice) * 100,
+    );
+    assert(shownPercent === 10, `витрина покажет ровно −10% (получилось −${shownPercent}%)`);
+
+    const tooMuch = await flow.applyProductField(saleTarget.id, "sale", "80");
+    assert(!tooMuch.ok, "скидка больше 50% не принимается");
+    assert((tooMuch.error ?? "").includes("50"), "и объясняет предел, а не молчит");
+
+    const byOldPrice = await flow.applyProductField(saleTarget.id, "sale", `${Math.round(basePrice * 1.5 / 100)}`);
+    assert(byOldPrice.ok, "скидку можно задать старой ценой");
+    assert(
+      byOldPrice.product!.oldPrice > basePrice,
+      "старая цена из ввода выше текущей",
+    );
+
+    const lower = await flow.applyProductField(saleTarget.id, "sale", "1");
+    assert(!lower.ok || lower.product!.oldPrice > lower.product!.price, "старая цена не может быть ниже текущей");
+
+    const cleared = await flow.applyProductField(saleTarget.id, "sale", "0");
+    assert(cleared.ok && cleared.product!.oldPrice === 0, "«0» снимает скидку");
+    assert(cleared.product!.price === basePrice, "снятие скидки не меняет цену клиента");
+
+    const productScreen = adminScreens.productAdminScreen({ ...cleared.product!, categoryName: "Тест" });
+    assert(
+      productScreen.keyboard.inline_keyboard.flat().some((b) => "callback_data" in b && b.callback_data === `edit:${saleTarget.id}:sale`),
+      "в карточке товара есть кнопка «Скидка»",
+    );
+    const prompt = screens.fieldPrompt("sale", cleared.product!);
+    assert(prompt.text.includes("%") && prompt.text.includes("0"), "подсказка объясняет процент и снятие скидки");
+  }
+
   // ── Массовые действия ────────────────────────────────────────────────────
   const bulkCategories = await repo.listCategoriesAdmin();
   const bulkTarget = bulkCategories.find((c) => c.productCount >= 2)!;

@@ -632,6 +632,7 @@ function fieldLabel(field: string): string {
   const labels: Record<string, string> = {
     title: "Название",
     price: "Цена",
+    sale: "Скидка",
     brand: "Бренд",
     desc: "Описание",
     photo: "Фото",

@@ -19,8 +19,9 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "fs/promises";
 import path from "path";
 
-const ROOT = path.join(process.cwd(), "public", "products");
-const ORIGINALS = path.join(process.cwd(), "public", "products", "originals");
+// Две папки: студийные кадры каталога и живые фото с прилавка.
+// Один скрипт на обе — иначе сборка сжимает половину галереи и забывает вторую.
+const DIRS = ["products", "shop-photos"] as const;
 const MAX_WIDTH = 1000;
 const QUALITY = 82;
 
@@ -44,24 +45,28 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!(await exists(ROOT))) {
-    console.log("[images] нет public/products — нечего сжимать");
-    return;
-  }
-
-  await mkdir(ORIGINALS, { recursive: true });
-  // Только исходники PNG/JPEG: WebP уже сжат, повторный проход портил бы качество
-  // и замедлял сборку. Добавили новое фото — положите PNG/JPEG, остальное сделает сборка.
-  const files = (await readdir(ROOT)).filter((f) => /\.(png|jpe?g)$/i.test(f));
-  if (files.length === 0) {
-    console.log("[images] всё уже в WebP — сжатие не требуется");
-    return;
-  }
   const results: Result[] = [];
 
+  for (const dir of DIRS) {
+  const folder = path.join(process.cwd(), "public", dir);
+  const originals = path.join(folder, "originals");
+  if (!(await exists(folder))) {
+    console.log(`[images] нет public/${dir} — пропускаем`);
+    continue;
+  }
+
+  await mkdir(originals, { recursive: true });
+  // Только исходники PNG/JPEG: WebP уже сжат, повторный проход портил бы качество
+  // и замедлял сборку. Добавили новое фото — положите PNG/JPEG, остальное сделает сборка.
+  const files = (await readdir(folder)).filter((f) => /\.(png|jpe?g)$/i.test(f));
+  if (files.length === 0) {
+    console.log(`[images] public/${dir}: всё уже в WebP — сжатие не требуется`);
+    continue;
+  }
+
   for (const file of files) {
-    const source = path.join(ROOT, file);
-    const original = path.join(ORIGINALS, file);
+    const source = path.join(folder, file);
+    const original = path.join(originals, file);
     // Исходник копируем один раз: дальше он всегда источник, даже если файл на месте уже сжатый.
     if (!(await exists(original))) {
       await writeFile(original, await readFile(source));
@@ -69,7 +74,7 @@ async function main(): Promise<void> {
     const cleanBuffer = await readFile(original);
     const meta = await sharp(cleanBuffer).metadata();
     const targetName = `${path.basename(file, path.extname(file))}.webp`;
-    const target = path.join(ROOT, targetName);
+    const target = path.join(folder, targetName);
 
     const compressed = await sharp(cleanBuffer)
       .resize({ width: Math.min(MAX_WIDTH, meta.width ?? MAX_WIDTH), withoutEnlargement: true })
@@ -88,6 +93,7 @@ async function main(): Promise<void> {
       before: cleanBuffer.length,
       after: hasTarget ? Math.min(compressed.length, currentSize) : compressed.length,
     });
+  }
   }
 
   const totalBefore = results.reduce((sum, r) => sum + r.before, 0);

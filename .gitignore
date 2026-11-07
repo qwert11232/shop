@@ -76,3 +76,6 @@ image-search/
 public/uploads/
 *.db-wal
 *.db-shm
+
+# Исходники живых фото: в репозиторий идут только сжатые WebP
+public/shop-photos/originals/

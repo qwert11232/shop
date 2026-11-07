@@ -74,6 +74,7 @@ async function main() {
   await checkDatabaseUrlParsing();
   await checkPhotoMigration();
   await checkSettingsAndSearch();
+  await checkDiscounts();
 
   console.log("[check:pg] PASS — SQL-слой совместим с PostgreSQL");
 }
@@ -248,6 +249,79 @@ async function checkPhotoMigration(): Promise<void> {
  * `settings` появилась в этом же коммите. На SQLite всё работает, но DDL и
  * ESCAPE-синтаксис нужно проверить на том движке, который стоит на бою.
  */
+/**
+ * Скидка на PostgreSQL: колонка old_price есть и в DDL, и в миграции,
+ * а фильтр «только со скидкой» работает на том же SQL-слое.
+ */
+async function checkDiscounts(): Promise<void> {
+  const { POSTGRES_SCHEMA_SQL } = await import("../src/lib/db-postgres-schema");
+  const { __setDbForCheck } = await import("../src/lib/db");
+  const repo = await import("../src/lib/repo");
+  const { applyFilters } = await import("../src/lib/catalog");
+  const { hasDiscount, discountPercent } = await import("../src/lib/price");
+
+  // Берём db-setup.sql — тот же файл, что применяется на managed-базе, —
+  // и проверяем, что колонка скидки доехала и туда, и в код-схему.
+  const pg = new PGlite();
+  await pg.exec(await readFile(path.join(process.cwd(), "db-setup.sql"), "utf8"));
+  assert(
+    POSTGRES_SCHEMA_SQL.includes("old_price") === true,
+    "old_price объявлен и в код-схеме, и в db-setup.sql",
+  );
+  assert(
+    (await tableHasColumn(pg, "products", "old_price")) === true,
+    "колонка old_price существует после установки схемы",
+  );
+  const db = createPostgresDb("postgres://local/discount", {
+    query: async (text: string, values?: unknown[]) => {
+      const res = await pg.query(text, values);
+      return { rows: res.rows };
+    },
+  });
+  __setDbForCheck(db);
+
+  const category = await repo.createCategory({ name: "Тест скидок", icon: "" });
+  const sale = await repo.createProduct({
+    title: "Товар со скидкой",
+    priceKopecks: 900000,
+    oldPriceKopecks: 1000000,
+    categoryId: category.id,
+  });
+  const plain = await repo.createProduct({
+    title: "Товар без скидки",
+    priceKopecks: 500000,
+    categoryId: category.id,
+  });
+
+  assert(sale.oldPrice === 1000000, "старая цена сохраняется в PostgreSQL");
+  assert(plain.oldPrice === 0, "без скидки old_price = 0, а не NULL");
+  assert(hasDiscount(sale) && discountPercent(sale) === 10, "скидка считается по данным из PostgreSQL");
+  assert(!hasDiscount(plain), "товар без старой цены скидкой не считается");
+
+  const onlyDiscounted = applyFilters(
+    [{ ...sale, brand: "" }, { ...plain, brand: "" }],
+    { onlyDiscounted: true },
+  );
+  assert(
+    onlyDiscounted.length === 1 && onlyDiscounted[0].id === sale.id,
+    "фильтр «только со скидкой» отбирает один товар",
+  );
+
+  const cleared = await repo.updateProduct(sale.id, { oldPriceKopecks: 0 });
+  assert(cleared?.oldPrice === 0, "скидка снимается и в PostgreSQL");
+  assert(!hasDiscount(cleared!), "после снятия товар обычный");
+  __setDbForCheck(null);
+}
+
+/** Есть ли колонка: DDL в коде и ALTER-миграции должны совпадать. */
+async function tableHasColumn(pg: PGlite, table: string, column: string): Promise<boolean> {
+  const res = await pg.query(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+    [table, column],
+  );
+  return res.rows.length > 0;
+}
+
 async function checkSettingsAndSearch(): Promise<void> {
   const pg = new PGlite();
   await pg.exec(await readFile(path.join(process.cwd(), "db-setup.sql"), "utf8"));

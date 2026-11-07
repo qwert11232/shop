@@ -4,15 +4,22 @@ import { useEffect, useMemo, useState } from "react";
 import { haptic } from "@/lib/telegram-webapp";
 import { money } from "@/lib/format";
 import ProductImage from "@/components/ui/ProductImage";
+import PhotoCarousel from "@/components/ui/PhotoCarousel";
+import { discountPercent, hasDiscount } from "@/lib/price";
 
 type Product = {
   id: string;
   title: string;
   description: string;
   price: number;
+  /** Старая цена для витрины; 0 — скидки нет. */
+  oldPrice?: number;
   photoUrl: string;
+  /** Кадры галереи для карусели в сетке. */
+  photos?: string[];
   categoryId: string;
   brand: string;
+  createdAt?: string;
 };
 type Facet = { name: string; unit: string; values: { value: string; count: number }[] };
 type Brand = { value: string; count: number };
@@ -92,16 +99,12 @@ export default function CatalogScreen(props: {
     };
   }, [category, search, sort, selectedBrands, selectedSpecs, priceRange]);
 
-  // Хиро — самый дорогой товар выборки: это витрина, а не первый по алфавиту.
-  // Из сетки он исключён, иначе одна и та же карточка стоит на экране дважды.
-  const hero = useMemo(
-    () => (products.length ? [...products].sort((a, b) => b.price - a.price)[0] : null),
-    [products],
-  );
-  const shelfProducts = useMemo(
-    () => (hero ? products.filter((p) => p.id !== hero.id) : products),
-    [products, hero],
-  );
+  // Новинки: свежие по дате поступления. В ленте — шесть, дальше это уже
+  // не «что нового», а второй каталог.
+  const newest = useMemo(() => {
+    const sorted = [...products].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
+    return sorted.slice(0, 6);
+  }, [products]);
 
   const activeFilters = useMemo(
     () =>
@@ -141,7 +144,7 @@ export default function CatalogScreen(props: {
             Техно<span className="signal">лаб</span>
           </span>
           <span className="h-3.5 w-px bg-rule" aria-hidden />
-          <span className="t-brand !text-ink-3">{products.length ? `${products.length} позиций` : "каталог"}</span>
+          <span className="t-brand !text-ink-3">каталог</span>
           <span className="flex-1" />
           {props.compare.length >= 2 && (
             <button onClick={props.onCompare} className="btn-ghost">
@@ -366,33 +369,39 @@ export default function CatalogScreen(props: {
           </div>
         )}
 
-        {/* Акцентный блок: один товар крупно, чтобы у первого экрана был
-            якорь. Без него каталог начинался со служебной строки фильтров
-            и читался как форма, а не как витрина. */}
-        {!loading && !search && hero && (
-          <section className="mt-4" aria-label="Выбор покупателей">
-            <h2 className="t-section mb-2">Выбор покупателей</h2>
-            <button
-              className="spotlight h-[188px]"
-              onClick={() => {
-                haptic("tap");
-                props.onOpen(hero.id);
-              }}
-              aria-label={`Открыть ${hero.title}`}
-            >
-              <ProductImage
-                src={hero.photoUrl}
-                alt={hero.title}
-                priority
-                className="h-full w-full object-contain p-5"
-                wrapperClassName="h-full w-full"
-              />
-              <span className="spotlight-badge" aria-hidden>Хит каталога</span>
-              <span className="spotlight-plate">
-                <span className="name">{hero.title}</span>
-                <span className="amount">{money(hero.price)}</span>
-              </span>
-            </button>
+        {/* Лента новинок. Стоит только в общем каталоге: в разделе покупатель
+            уже сузил выбор категорией, и лента «из другого» там мешает. */}
+        {!category && !search && newest.length > 0 && !loading && (
+          <section className="mt-4" aria-label="Новинки">
+            <div className="flex items-baseline justify-between mb-2">
+              <h2 className="t-section">Новое в магазине</h2>
+              <span className="t-brand">{newest.length} позиции</span>
+            </div>
+            {/* Полный bleed до краёв экрана: лента должна «уходить» за край,
+                иначе читается как обрезанный блок. Отступ слева — внутри
+                самого скролла, иначе первая карточка липла к краю. */}
+            <div className="no-scrollbar edge-fade news-rail -mx-4 px-4">
+              {newest.map((p) => (
+                <button
+                  key={p.id}
+                  className="news-card"
+                  onClick={() => {
+                    haptic("tap");
+                    props.onOpen(p.id);
+                  }}
+                  aria-label={`Открыть ${p.title}`}
+                >
+                  <div className="photo-frame">
+                    <ProductImage src={p.photoUrl} alt={p.title} priority />
+                  </div>
+                  <div className="name">{p.title}</div>
+                  <div className="flex items-baseline gap-1.5 flex-wrap">
+                    <span className="amount price">{money(p.price)}</span>
+                    {hasDiscount(p) && <span className="price-old">{money(p.oldPrice!)}</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
           </section>
         )}
 
@@ -407,7 +416,7 @@ export default function CatalogScreen(props: {
                   <div className="h-3 w-1/2 bg-[#f0f0f0] rounded mt-1.5" />
                 </div>
               ))
-            : shelfProducts.map((p, index) => (
+            : products.map((p, index) => (
                 <article key={p.id} className="shelf-cell relative">
                   <button
                     onClick={() => {
@@ -417,12 +426,20 @@ export default function CatalogScreen(props: {
                     className="block w-full text-left"
                     aria-label={`Открыть ${p.title}`}
                   >
-                    <div className="photo-frame aspect-square rounded-[6px]">
-                      <ProductImage src={p.photoUrl} alt={p.title} priority={index < 4} />
+                    <div className="relative">
+                      <PhotoCarousel photos={p.photos?.length ? p.photos : [p.photoUrl]} title={p.title} priority={index < 4} />
+                      {/* Скидка — на фото, а не в строке цены: на узкой карточке
+                          «цена + старая цена + процент» переносились и рвали
+                          выравнивание сетки. */}
+                      {hasDiscount(p) && <span className="discount-badge">−{discountPercent(p)}%</span>}
                     </div>
+
                     {p.brand && <div className="t-brand mt-2.5">{p.brand}</div>}
                     <div className="t-title line-clamp-2 mt-1 min-h-[2.64em]">{p.title}</div>
-                    <div className="t-price-lg price">{money(p.price)}</div>
+                    <div className="flex items-baseline gap-1.5 whitespace-nowrap overflow-hidden">
+                      <span className="t-price-lg price shrink-0">{money(p.price)}</span>
+                      {hasDiscount(p) && <span className="price-old">{money(p.oldPrice!)}</span>}
+                    </div>
                   </button>
 
                   {/* Сравнение: отдельная кнопка, чтобы не мешать переходу в карточку */}
