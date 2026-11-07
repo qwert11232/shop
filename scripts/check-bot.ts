@@ -422,8 +422,10 @@ async function main() {
   assert(noticeCancelled?.includes("бонусы"), "при отмене напоминаем про возврат бонусов");
 
   // Сквозной путь по базе: new → confirmed → paid → shipped → done + трек.
+  // Только продающийся товар: снятый с продажи заказ оформить нельзя,
+  // и тест не должен ловить эту проверку вместо проверяемого сценария.
   const realProduct = await repo.listProductsAdmin();
-  const flowItem = realProduct[0];
+  const flowItem = realProduct.find((p) => p.isActive)!;
   const flowOrder = await shop.createPurchaseOrder({
     tgUserId: "888",
     contactName: "Путь",

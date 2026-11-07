@@ -205,16 +205,21 @@ async function main() {
   assert(shop.maxBonusFor(100000, 5000) === 5000, "списать можно не больше баланса");
   assert(shop.maxBonusFor(100000, 0) === 0, "без баланса списания нет");
 
+  // Сумма заказа теперь считается на сервере по цене товара, а не берётся
+  // из запроса. Бонусы — 30% от реальной суммы, остаток идёт в кешбэк.
   const withBonus = await shop.createPurchaseOrder({
     tgUserId: user,
     contactName: "Иван",
     contactPhone: "+79001234567",
-    total: 100000,
+    total: target.price,
     bonusToUse: 30000,
     items: [{ productId: target.id, variantId: null, quantity: 1 }],
   });
   assert(withBonus.bonusUsed === 30000, "бонусы списываются при оформлении");
-  assert(withBonus.bonusEarned === Math.round(70000 * 0.03), "кешбэк считается от оплаченной суммы");
+  assert(
+    withBonus.bonusEarned === Math.round((withBonus.total - 30000) * 0.03),
+    "кешбэк считается от оплаченной суммы",
+  );
 
   // ── Доставка ──────────────────────────────────────────────────────────────
   assert(await shop.setDeliveryStatus(order.id, "shipped", "RU777"), "статус доставки меняется админом");
@@ -422,6 +427,26 @@ async function main() {
       catalogUi.includes("setOnlyDiscounted(false);"),
       "«Сбросить всё» снимает фильтр скидок",
     );
+
+    // Корзина: строка адресуется по id, а не по составному ключу с variant_id.
+    // В PostgreSQL variant_id в первичном ключе неявно NOT NULL — товар без
+    // варианта не добавлялся вовсе. Проверяем оба пути и на SQLite.
+    const plainProduct = products.find((p) => !p.oldPrice || p.oldPrice <= p.price)!;
+    const plainCart = await shop.addToCart({ tgUserId: "777002", productId: plainProduct.id, quantity: 1 });
+    assert(
+      plainCart.lines.length === 1 && plainCart.lines[0].variantId === null,
+      "товар без вариантов кладётся в корзину (раньше падало на PostgreSQL)",
+    );
+    const cartId = await (async () => {
+      const { getDb } = await import("../src/lib/db");
+      const db = await getDb();
+      const row = await db.get<{ id: string }>("SELECT id FROM cart_items WHERE tg_user_id = ?", ["777002"]);
+      return row?.id ?? "";
+    })();
+    assert(cartId.startsWith("ci-"), "у строки корзины есть собственный id");
+    const sameAgain = await shop.addToCart({ tgUserId: "777002", productId: plainProduct.id, quantity: 1 });
+    assert(sameAgain.lines.length === 1 && sameAgain.lines[0].quantity === 2, "повтор не создаёт вторую строку");
+    await shop.clearCart("777002");
 
     // Корзина и заказ берут price, а не oldPrice.
     const buyer = "777001";

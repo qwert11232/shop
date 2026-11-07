@@ -101,12 +101,12 @@ CREATE TABLE IF NOT EXISTS favorites (
 );
 
 CREATE TABLE IF NOT EXISTS cart_items (
+  id         TEXT PRIMARY KEY,
   tg_user_id TEXT NOT NULL,
   product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   variant_id TEXT,
   quantity   INTEGER NOT NULL DEFAULT 1,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (tg_user_id, product_id, variant_id)
+  updated_at INTEGER NOT NULL
 );
 
 -- Профиль клиента: телефон и имя для быстрого оформления, бонусный баланс.
@@ -169,6 +169,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(tg_user_id);
 CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants(product_id);
 CREATE INDEX IF NOT EXISTS idx_media_product ON product_media(product_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cart_unique ON cart_items(tg_user_id, product_id, COALESCE(variant_id, ''));
 CREATE INDEX IF NOT EXISTS idx_cart_user ON cart_items(tg_user_id);
 CREATE INDEX IF NOT EXISTS idx_bonus_user ON bonus_events(tg_user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id);
@@ -197,6 +198,28 @@ function migrateSqlite(db: Database.Database): void {
   ensure("orders", "contact_phone", "TEXT NOT NULL DEFAULT ''");
   ensure("products", "brand", "TEXT NOT NULL DEFAULT ''");
   ensure("products", "old_price", "INTEGER NOT NULL DEFAULT 0");
+
+  // Корзина: раньше ключом было (tg_user_id, product_id, variant_id) и все
+  // обращения шли по этим колонкам. Теперь строка адресуется по `id`, поэтому
+  // старую таблицу пересобираем — SQLite не умеет менять первичный ключ.
+  // На PostgreSQL то же самое делает DO-блок в db-setup.sql.
+  if (!columns("cart_items").includes("id")) {
+    db.exec(`
+      ALTER TABLE cart_items RENAME TO cart_items_old;
+      CREATE TABLE cart_items (
+        id         TEXT PRIMARY KEY,
+        tg_user_id TEXT NOT NULL,
+        product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        variant_id TEXT,
+        quantity   INTEGER NOT NULL DEFAULT 1,
+        updated_at INTEGER NOT NULL
+      );
+      INSERT INTO cart_items (id, tg_user_id, product_id, variant_id, quantity, updated_at)
+        SELECT 'ci-' || lower(hex(randomblob(6))), tg_user_id, product_id, variant_id, quantity, updated_at
+        FROM cart_items_old;
+      DROP TABLE cart_items_old;
+    `);
+  }
 }
 
 export function createSqliteDb(file: string): Db {
