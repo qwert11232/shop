@@ -205,16 +205,21 @@ async function main() {
   assert(shop.maxBonusFor(100000, 5000) === 5000, "списать можно не больше баланса");
   assert(shop.maxBonusFor(100000, 0) === 0, "без баланса списания нет");
 
+  // Сумма заказа теперь считается на сервере по цене товара, а не берётся
+  // из запроса. Бонусы — 30% от реальной суммы, остаток идёт в кешбэк.
   const withBonus = await shop.createPurchaseOrder({
     tgUserId: user,
     contactName: "Иван",
     contactPhone: "+79001234567",
-    total: 100000,
+    total: target.price,
     bonusToUse: 30000,
     items: [{ productId: target.id, variantId: null, quantity: 1 }],
   });
   assert(withBonus.bonusUsed === 30000, "бонусы списываются при оформлении");
-  assert(withBonus.bonusEarned === Math.round(70000 * 0.03), "кешбэк считается от оплаченной суммы");
+  assert(
+    withBonus.bonusEarned === Math.round((withBonus.total - 30000) * 0.03),
+    "кешбэк считается от оплаченной суммы",
+  );
 
   // ── Доставка ──────────────────────────────────────────────────────────────
   assert(await shop.setDeliveryStatus(order.id, "shipped", "RU777"), "статус доставки меняется админом");

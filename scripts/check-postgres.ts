@@ -478,6 +478,46 @@ async function checkOrderFlow(): Promise<void> {
   const shipped = (await shop.listMyOrders(buyer)).find((o) => o.id === order.id)!;
   assert(shipped !== undefined, "смена статуса доставки не теряет заказ");
 
+  // Снятый с продажи товар не должен ни добавляться в корзину, ни попадать
+  // в заказ: иначе клиент оформляет то, чего магазин уже не продаёт.
+  await db.run("UPDATE products SET is_active = ? WHERE id = ?", [false, "p-plain"]);
+  let hiddenRejected = false;
+  await shop.addToCart({ tgUserId: buyer, productId: "p-plain", quantity: 1 }).catch(() => {
+    hiddenRejected = true;
+  });
+  assert(hiddenRejected, "скрытый товар не добавляется в корзину");
+
+  // Скрытая позиция не должна подменять сумму молча: заказ отклоняется
+  // с просьбой обновить корзину.
+  let staleRejected = false;
+  await shop
+    .createPurchaseOrder({
+      tgUserId: buyer,
+      contactName: "Иван",
+      contactPhone: "+7 900 000-00-00",
+      total: 100000,
+      items: [
+        { productId: "p-plain", variantId: null, quantity: 1 },
+        { productId: "p-var", variantId: "v-128", quantity: 1 },
+      ],
+    })
+    .catch(() => {
+      staleRejected = true;
+    });
+  assert(staleRejected, "заказ со снятой с продажи позицией отклоняется, а не урезается молча");
+
+  // Корзина показывает только то, что продаётся.
+  await shop.clearCart(buyer);
+  await db.run("UPDATE products SET is_active = ? WHERE id = ?", [true, "p-plain"]);
+  await shop.addToCart({ tgUserId: buyer, productId: "p-plain", quantity: 1 });
+  await shop.addToCart({ tgUserId: buyer, productId: "p-var", variantId: "v-128", quantity: 1 });
+  await db.run("UPDATE products SET is_active = ? WHERE id = ?", [false, "p-plain"]);
+  const shrunk = await shop.getCart(buyer);
+  assert(
+    shrunk.lines.length === 1 && shrunk.lines[0].productId === "p-var",
+    "корзина не показывает снятый с продажи товар",
+  );
+
   await shop.clearCart(buyer);
   const empty = await shop.getCart(buyer);
   assert(empty.lines.length === 0 && empty.savings === 0, "после оформления корзина пуста");

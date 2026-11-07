@@ -257,11 +257,11 @@ export async function getCart(tgUserId: string): Promise<Cart> {
     `SELECT c.product_id, p.title, p.photo_url, c.variant_id,
             v.label AS variant_label, p.price AS base_price, p.old_price, v.extra AS variant_extra, c.quantity
      FROM cart_items c
-     JOIN products p ON p.id = c.product_id
+     JOIN products p ON p.id = c.product_id AND p.is_active = ?
      LEFT JOIN product_variants v ON v.id = c.variant_id
      WHERE c.tg_user_id = ?
      ORDER BY c.updated_at DESC`,
-    [tgUserId],
+    [true, tgUserId],
   );
 
   const lines: CartLine[] = rows.map((r) => {
@@ -303,8 +303,11 @@ export async function addToCart(input: {
   quantity?: number;
 }): Promise<Cart> {
   const db = await getDb();
-  const product = await db.get<{ id: string }>("SELECT id FROM products WHERE id = ?", [input.productId]);
-  if (!product) throw new Error("Товар не найден");
+  const product = await db.get<{ id: string }>(
+    "SELECT id FROM products WHERE id = ? AND is_active = ?",
+    [input.productId, true],
+  );
+  if (!product) throw new Error("Товар не найден или снят с продажи");
 
   const variantId = input.variantId || null;
   if (variantId) {
@@ -478,10 +481,39 @@ export type CreateOrderInput = {
  */
 export async function createPurchaseOrder(input: CreateOrderInput): Promise<OrderSummary> {
   const db = await getDb();
+
+  // Товар могли снять с продажи, пока он лежал в корзине: такой позиции
+  // в заказе быть не должно. Проверяем до вставки, а не после — иначе
+  // клиент получил бы заказ на то, чего магазин не продаёт.
+  // Молча выкидывать позицию нельзя: клиент подтверждал одну сумму, а получил
+  // бы другую. Поэтому просим обновить корзину — она покажет, что осталось.
+  const items: CreateOrderInput["items"] = [];
+  for (const item of input.items) {
+    const alive = await db.get<{ id: string }>(
+      "SELECT id FROM products WHERE id = ? AND is_active = ?",
+      [item.productId, true],
+    );
+    if (!alive) throw new Error("Часть товаров больше не продаётся — обновите корзину");
+    items.push(item);
+  }
+  if (items.length === 0) throw new Error("Корзина пуста");
+
   const orderId = `ord-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-  const bonusUsed = Math.max(0, Math.min(Math.round(input.bonusToUse ?? 0), input.total));
-  const paid = input.total - bonusUsed;
+  // Сумма считается заново по актуальным ценам: присланный из браузера total
+  // не источник истины, иначе снятая с продажи позиция уехала бы в итог.
+  let orderTotal = 0;
+  for (const item of items) {
+    const row = await db.get<{ price: number | string }>("SELECT price FROM products WHERE id = ?", [item.productId]);
+    const extra = item.variantId
+      ? await db.get<{ extra: number | string }>("SELECT extra FROM product_variants WHERE id = ?", [item.variantId])
+      : null;
+    orderTotal += (Number(row?.price ?? 0) + Number(extra?.extra ?? 0)) * item.quantity;
+  }
+  if (orderTotal <= 0) throw new Error("Не удалось посчитать сумму заказа");
+
+  const bonusUsed = Math.max(0, Math.min(Math.round(input.bonusToUse ?? 0), orderTotal));
+  const paid = orderTotal - bonusUsed;
   const bonusEarned = Math.round(paid * 0.03);
 
   await db.run(
@@ -495,8 +527,8 @@ export async function createPurchaseOrder(input: CreateOrderInput): Promise<Orde
       input.contactName,
       "",
       input.groupMessageId ?? null,
-      input.items[0]?.productId ?? "",
-      input.total,
+      items[0]?.productId ?? "",
+      orderTotal,
       bonusUsed,
       bonusEarned,
       input.contactName,
@@ -504,7 +536,7 @@ export async function createPurchaseOrder(input: CreateOrderInput): Promise<Orde
     ],
   );
 
-  for (const item of input.items) {
+  for (const item of items) {
     const product = await db.get<{ title: string; price: number | string }>(
       "SELECT title, price FROM products WHERE id = ?",
       [item.productId],

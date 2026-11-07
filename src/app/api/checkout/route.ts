@@ -62,22 +62,35 @@ export async function POST(req: NextRequest) {
   const contactName = String(body.contactName ?? customer.firstName ?? "").trim().slice(0, 60) || "Клиент";
   const comment = String(body.comment ?? "").slice(0, 500);
 
-  const cap = maxBonusFor(cart.total, customer.bonusBalance);
+  // getCart уже отдаёт только продающиеся товары. Если что-то сняли с продажи
+  // после того, как клиент открыл корзину, createPurchaseOrder попросит
+  // обновить корзину — сумму молча не подменяем.
+  const available = cart.lines;
+  const cap = maxBonusFor(
+    available.reduce((sum, line) => sum + line.lineTotal, 0),
+    customer.bonusBalance,
+  );
   const bonusToUse = body.useBonus ? Math.min(Math.max(Math.round(Number(body.bonusAmount ?? cap)), 0), cap) : 0;
 
-  const order = await createPurchaseOrder({
-    tgUserId: me,
-    contactName,
-    contactPhone: phone,
-    comment,
-    bonusToUse,
-    total: cart.total,
-    items: cart.lines.map((line: CartLine) => ({
-      productId: line.productId,
-      variantId: line.variantId,
-      quantity: line.quantity,
-    })),
-  });
+  let order;
+  try {
+    order = await createPurchaseOrder({
+      tgUserId: me,
+      contactName,
+      contactPhone: phone,
+      comment,
+      bonusToUse,
+      total: available.reduce((sum, line) => sum + line.lineTotal, 0),
+      items: available.map((line: CartLine) => ({
+        productId: line.productId,
+        variantId: line.variantId,
+        quantity: line.quantity,
+      })),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Не удалось оформить заказ";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 
   // Сообщение в группу: одна строка на позицию, чтобы владелец видел весь заказ.
   const itemsText = order.items
