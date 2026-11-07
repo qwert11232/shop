@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS products (
   description TEXT NOT NULL DEFAULT '',
   price       INTEGER NOT NULL,
   photo_url   TEXT NOT NULL,
+  old_price   INTEGER NOT NULL DEFAULT 0,
   is_active   BOOLEAN NOT NULL DEFAULT TRUE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   category_id TEXT NOT NULL REFERENCES categories(id)
@@ -142,6 +143,12 @@ CREATE TABLE IF NOT EXISTS order_events (
   created_at BIGINT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS bot_state (
   chat_id    TEXT PRIMARY KEY,
   kind       TEXT NOT NULL,
@@ -174,6 +181,7 @@ ALTER TABLE orders   ADD COLUMN IF NOT EXISTS bonus_earned   INTEGER NOT NULL DE
 ALTER TABLE orders   ADD COLUMN IF NOT EXISTS contact_name   TEXT NOT NULL DEFAULT '';
 ALTER TABLE orders   ADD COLUMN IF NOT EXISTS contact_phone  TEXT NOT NULL DEFAULT '';
 ALTER TABLE products ADD COLUMN IF NOT EXISTS brand          TEXT NOT NULL DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS old_price      INTEGER NOT NULL DEFAULT 0;
 `;
 let applied: Promise<void> | null = null;
 

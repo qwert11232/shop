@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiHeaders, haptic } from "@/lib/telegram-webapp";
 import { money, plural, shortDate } from "@/lib/format";
 import ProductImage from "@/components/ui/ProductImage";
+import { hasDiscount } from "@/lib/price";
 
 type Variant = { id: string; label: string; kind: string; extra: number };
 type Spec = { group: string; name: string; value: string; unit: string; numeric: number | null };
@@ -14,6 +15,8 @@ type Product = {
   title: string;
   description: string;
   price: number;
+  /** Старая цена для витрины; 0 — скидки нет. */
+  oldPrice?: number;
   photoUrl: string;
   brand: string;
   variants: Variant[];
@@ -211,7 +214,7 @@ export default function ProductScreen(props: {
 
   return (
     <div className="flex flex-col pb-4">
-      <header className="sticky top-0 z-20 bg-paper border-b border-ink px-4 py-2.5 flex items-center gap-2">
+      <header className="app-header px-4 py-2.5 flex items-center gap-2">
         <button className="icon-btn" onClick={props.onBack} aria-label="Назад">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>
             <path d="M15 5l-7 7 7 7" />
@@ -242,7 +245,7 @@ export default function ProductScreen(props: {
       </header>
 
       {/* Галерея: свайп горизонтально, точки, счётчик */}
-      <div className="relative bg-[#f6f6f6]">
+      <div className="relative photo-frame">
         <div
           className="no-scrollbar flex overflow-x-auto snap-x snap-mandatory"
           onScroll={(e) => {
@@ -264,7 +267,7 @@ export default function ProductScreen(props: {
               </div>
             ) : (
               <div key={`${item.url}-${index}`} className="min-w-full snap-center aspect-square flex items-center justify-center">
-                <ProductImage src={item.url} alt={`${product.title} — фото ${index + 1}`} priority={index === galleryIndex} className="h-full w-full object-contain p-6" wrapperClassName="h-full w-full" />
+                <ProductImage src={item.url} alt={`${product.title} — фото ${index + 1}`} priority={index === galleryIndex} className="h-full w-full object-cover" wrapperClassName="h-full w-full" />
               </div>
             ),
           )}
@@ -282,10 +285,13 @@ export default function ProductScreen(props: {
       </div>
 
       <div className="px-4 pt-3">
-        {product.brand && <div className="meta">{product.brand}</div>}
-        <h1 className="font-display font-bold text-[18px] leading-snug mt-0.5">{product.title}</h1>
-        <div className="flex items-baseline gap-2 mt-1.5">
-          <span className="price text-[24px]">{money(total)}</span>
+        {product.brand && <div className="t-brand">{product.brand}</div>}
+        <h1 className="font-display font-bold text-[19px] leading-tight tracking-[-0.025em] mt-1">{product.title}</h1>
+        <div className="flex items-baseline gap-2 mt-2">
+          <span className="price text-[26px] leading-none">{money(total)}</span>
+          {hasDiscount(product) && chosenExtra === 0 && (
+            <span className="price-old !text-[13px]">{money(product.oldPrice!)}</span>
+          )}
           {chosenExtra !== 0 && <span className="meta">базовая {money(product.price)}</span>}
         </div>
         {product.rating !== null && (
@@ -463,20 +469,20 @@ export default function ProductScreen(props: {
         {/* Cross-sell: аксессуары к этой технике */}
         {product.crossSell.length > 0 && (
           <section className="mt-2 mb-4">
-            <h2 className="font-display font-bold text-[14px] mb-2">С этим товаром покупают</h2>
-            <div className="no-scrollbar flex gap-2 overflow-x-auto -mx-4 px-4">
+            <h2 className="t-section mb-2">С этим товаром покупают</h2>
+            <div className="no-scrollbar edge-fade flex gap-2 overflow-x-auto -mx-4 px-4">
               {product.crossSell.map((item) => (
                 <button
                   key={item.id}
                   onClick={() => props.onOpen(item.id)}
                   className="min-w-[132px] w-[132px] border border-rule rounded-[12px] text-left"
                 >
-                  <div className="aspect-square bg-[#f6f6f6] rounded-t-[12px]">
-                    <ProductImage src={item.photoUrl} alt={item.title} className="h-full w-full object-contain p-2" />
+                  <div className="photo-frame aspect-square rounded-t-[12px]">
+                    <ProductImage src={item.photoUrl} alt={item.title} className="h-full w-full object-contain p-2.5" />
                   </div>
                   <div className="p-2">
-                    <div className="text-[12px] font-medium line-clamp-2 min-h-[2.4em]">{item.title}</div>
-                    <div className="price text-[12px] mt-1">{money(item.price)}</div>
+                    <div className="text-[12px] font-semibold leading-snug line-clamp-2 min-h-[2.4em]">{item.title}</div>
+                    <div className="price text-[13px] mt-1.5">{money(item.price)}</div>
                   </div>
                 </button>
               ))}

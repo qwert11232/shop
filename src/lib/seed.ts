@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { pruneLegacyDemoProducts, type SeedCleanupResult } from "./seed-cleanup";
 import { SEED_CATEGORIES, SEED_PRODUCTS, type SeedProduct } from "./catalog-seed";
 
 /**
@@ -28,6 +29,8 @@ export type SeedResult = {
   crossSell: number;
   /** Сколько уже существующих товаров удалось дозаполнить (бренд, детали). */
   backfilled: number;
+  /** Что убрано с витрины: удалено физически или скрыто из-за заказов. */
+  cleanup: SeedCleanupResult;
   driver: string;
 };
 
@@ -37,6 +40,9 @@ function uid(): string {
 
 export async function seedCatalog(): Promise<SeedResult> {
   const db = await getDb();
+  // Позиции, ушедшие из кода вместе с честными фото (см. seed-cleanup.ts).
+  // Делаем до сида: иначе они бы воскресли при первом же проходе.
+  const cleanup = await pruneLegacyDemoProducts();
   const catIds: Record<string, string> = {};
   let newCategories = 0;
 
@@ -103,9 +109,18 @@ export async function seedCatalog(): Promise<SeedResult> {
     }
     const id = uid();
     await db.run(
-      `INSERT INTO products (id, title, description, price, photo_url, category_id, brand)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, p.title, p.desc, Math.round(p.priceRub * 100), p.photo, catIds[p.category], p.brand],
+      `INSERT INTO products (id, title, description, price, photo_url, category_id, brand, old_price)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        p.title,
+        p.desc,
+        Math.round(p.priceRub * 100),
+        p.photo,
+        catIds[p.category],
+        p.brand,
+        Math.round((p.oldPriceRub ?? 0) * 100),
+      ],
     );
     productIds[p.title] = id;
     newProducts += 1;
@@ -154,6 +169,7 @@ export async function seedCatalog(): Promise<SeedResult> {
     specs: newSpecs,
     crossSell,
     backfilled,
+    cleanup,
     driver: db.dialect,
   };
 }
@@ -229,21 +245,31 @@ async function seedDetails(
     specs += 1;
   }
 
-  const mediaRow = await db.get<{ c: number | string }>(
-    "SELECT COUNT(*) AS c FROM product_media WHERE product_id = ?",
+  // Галерея догоняется, а не только создаётся: у существующих товаров сид
+  // раньше не добавлял новые кадры, и живые фото с прилавка не доезжали до
+  // карточки без пересева базы. Уже загруженные владельцем кадры не трогаем —
+  // добавляем только те, которых в базе нет.
+  const gallery = [p.photo, ...(p.gallery ?? [])];
+  const existingMedia = await db.all<{ url: string }>(
+    "SELECT url FROM product_media WHERE product_id = ? AND kind = 'image'",
     [productId],
   );
-  if (Number(mediaRow?.c ?? 0) === 0) {
-    const gallery = [p.photo, ...(p.gallery ?? [])];
-    for (const [index, url] of gallery.entries()) {
-      await db.run("INSERT INTO product_media (id, product_id, kind, url, sort_order) VALUES (?, ?, ?, ?, ?)", [
-        uid(),
-        productId,
-        "image",
-        url,
-        index,
-      ]);
-    }
+  // Если владелец загрузил свои кадры (они лежат в /uploads/), сид не
+  // подмешивает демо-фото: иначе на витрине снова окажется чужая техника
+  // вместо снятой в магазине. Уже загруженные файлы не трогаем — это правило
+  // из брифа: фото, изменённые владельцем, сид не перезаписывает.
+  const ownerUploaded = existingMedia.some((m) => m.url.startsWith("/uploads/"));
+  const known = new Set(existingMedia.map((m) => m.url));
+  for (const [index, url] of gallery.entries()) {
+    if (known.has(url)) continue;
+    if (ownerUploaded) continue;
+    await db.run("INSERT INTO product_media (id, product_id, kind, url, sort_order) VALUES (?, ?, ?, ?, ?)", [
+      uid(),
+      productId,
+      "image",
+      url,
+      index,
+    ]);
   }
 
   return { variants, specs };

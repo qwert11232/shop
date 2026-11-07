@@ -4,15 +4,22 @@ import { useEffect, useMemo, useState } from "react";
 import { haptic } from "@/lib/telegram-webapp";
 import { money } from "@/lib/format";
 import ProductImage from "@/components/ui/ProductImage";
+import PhotoCarousel from "@/components/ui/PhotoCarousel";
+import { discountPercent, hasDiscount } from "@/lib/price";
 
 type Product = {
   id: string;
   title: string;
   description: string;
   price: number;
+  /** Старая цена для витрины; 0 — скидки нет. */
+  oldPrice?: number;
   photoUrl: string;
+  /** Кадры галереи для карусели в сетке. */
+  photos?: string[];
   categoryId: string;
   brand: string;
+  createdAt?: string;
 };
 type Facet = { name: string; unit: string; values: { value: string; count: number }[] };
 type Brand = { value: string; count: number };
@@ -45,6 +52,7 @@ export default function CatalogScreen(props: {
   const [selectedSpecs, setSelectedSpecs] = useState<Record<string, string[]>>({});
   const [priceRange, setPriceRange] = useState<{ min?: number; max?: number }>({});
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -91,6 +99,13 @@ export default function CatalogScreen(props: {
     };
   }, [category, search, sort, selectedBrands, selectedSpecs, priceRange]);
 
+  // Новинки: свежие по дате поступления. В ленте — шесть, дальше это уже
+  // не «что нового», а второй каталог.
+  const newest = useMemo(() => {
+    const sorted = [...products].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
+    return sorted.slice(0, 6);
+  }, [products]);
+
   const activeFilters = useMemo(
     () =>
       selectedBrands.length +
@@ -123,9 +138,13 @@ export default function CatalogScreen(props: {
 
   return (
     <div className="flex flex-col">
-      <header className="sticky top-0 z-20 bg-paper border-b border-ink">
-        <div className="px-4 pt-3 pb-2.5 flex items-center gap-2">
-          <span className="font-display font-bold text-[15px]">ТЕХНОЛАБ</span>
+      <header className="app-header">
+        <div className="px-4 pt-3 pb-2 flex items-center gap-2.5">
+          <span className="masthead">
+            Техно<span className="signal">лаб</span>
+          </span>
+          <span className="h-3.5 w-px bg-rule" aria-hidden />
+          <span className="t-brand !text-ink-3">каталог</span>
           <span className="flex-1" />
           {props.compare.length >= 2 && (
             <button onClick={props.onCompare} className="btn-ghost">
@@ -140,18 +159,19 @@ export default function CatalogScreen(props: {
           </a>
         </div>
 
-        {/* Поиск: сразу под шапкой, на всю ширину */}
+        {/* Поиск: pl-11 оставляет место иконке. Раньше .input вне @layer
+            перебивал pl-9, и текст начинался под лупой. */}
         <div className="px-4 pb-2.5">
           <div className="relative">
             <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-2"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none"
               width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden
             >
               <circle cx="11" cy="11" r="6.5" />
               <path d="M16 16l4.5 4.5" />
             </svg>
             <input
-              className="input pl-9"
+              className="input pl-11"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Найти технику или бренд"
@@ -160,7 +180,7 @@ export default function CatalogScreen(props: {
             />
             {search && (
               <button
-                className="absolute right-2 top-1/2 -translate-y-1/2 icon-btn"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 icon-btn"
                 onClick={() => setSearch("")}
                 aria-label="Очистить поиск"
               >
@@ -174,22 +194,22 @@ export default function CatalogScreen(props: {
       </header>
 
       <div className="px-4">
-        {/* Категории */}
-        <nav className="no-scrollbar flex gap-2 overflow-x-auto mt-3 -mx-4 px-4 pb-1" aria-label="Категории">
+        {/* Категории: лента с затуханием по краю — видно, что есть ещё */}
+        <nav className="no-scrollbar edge-fade flex gap-4 overflow-x-auto -mx-4 px-4 pt-1" aria-label="Категории">
           <button
-            className={`chip ${category === "" ? "active" : ""}`}
+            className={`tab ${category === "" ? "active" : ""}`}
             onClick={() => {
               haptic("select");
               setCategory("");
             }}
             aria-pressed={category === ""}
           >
-            Все
+            Всё
           </button>
           {categories.map((c) => (
             <button
               key={c.id}
-              className={`chip ${category === c.id ? "active" : ""}`}
+              className={`tab ${category === c.id ? "active" : ""}`}
               onClick={() => {
                 haptic("select");
                 setCategory(c.id);
@@ -202,21 +222,29 @@ export default function CatalogScreen(props: {
           ))}
         </nav>
 
-        {/* Строка управления: сортировка и фильтры */}
-        <div className="flex items-center gap-2 mt-3">
-          <label className="sr-only" htmlFor="sort">Сортировка</label>
-          <select
-            id="sort"
-            className="input !w-auto !py-1.5 text-[13px]"
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-          >
-            {SORTS.map((s) => (
-              <option key={s.key} value={s.key}>{s.label}</option>
-            ))}
-          </select>
+        {/* Строка управления: счётчик слева, сортировка и фильтры справа.
+            Раньше здесь был выпадающий список — на iOS он выглядит как поле ввода
+            и спорит с поиском. Теперь сортировка — текстовая кнопка. */}
+        <div className="flex items-center gap-2 mt-3 pb-2 border-b border-rule">
+          <span className="t-brand !text-ink-2">{loading ? "ищем…" : `${products.length} позиций`}</span>
+          <span className="flex-1" />
           <button
-            className={`chip ${activeFilters ? "active" : ""}`}
+            className="text-[12px] font-semibold text-ink-2 inline-flex items-center gap-1"
+            onClick={() => {
+              haptic("tap");
+              setSortOpen((open) => !open);
+            }}
+            aria-expanded={sortOpen}
+            aria-label="Сортировка"
+          >
+            {SORTS.find((s) => s.key === sort)?.label ?? "Сортировка"}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          <span className="h-3 w-px bg-rule" aria-hidden />
+          <button
+            className={`text-[12px] font-semibold inline-flex items-center gap-1 ${activeFilters ? "text-signal" : "text-ink-2"}`}
             onClick={() => {
               haptic("tap");
               setFiltersOpen((open) => !open);
@@ -224,10 +252,37 @@ export default function CatalogScreen(props: {
             aria-expanded={filtersOpen}
           >
             Фильтры{activeFilters ? ` · ${activeFilters}` : ""}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden>
+              <path d="M4 7h16M7 12h10M10 17h4" />
+            </svg>
           </button>
-          <span className="flex-1" />
-          <span className="meta">{loading ? "ищем…" : `${products.length} шт.`}</span>
         </div>
+
+        {sortOpen && (
+          <div className="border border-rule rounded-[10px] mt-2 overflow-hidden">
+            {SORTS.map((option) => (
+              <button
+                key={option.key}
+                className={`w-full text-left px-3 py-2.5 text-[13px] border-b border-rule last:border-b-0 flex items-center gap-2 ${
+                  sort === option.key ? "font-semibold" : "text-ink-2"
+                }`}
+                onClick={() => {
+                  haptic("select");
+                  setSort(option.key);
+                  setSortOpen(false);
+                }}
+                aria-pressed={sort === option.key}
+              >
+                {option.label}
+                {sort === option.key && (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="ml-auto text-signal" aria-hidden>
+                    <path d="M5 12.5l4.5 4.5L19 7.5" />
+                  </svg>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
 
         {filtersOpen && (
           <div className="mt-3 border border-ink rounded-[14px] p-3">
@@ -314,20 +369,55 @@ export default function CatalogScreen(props: {
           </div>
         )}
 
-        {/* Сетка товаров */}
-        <section className="grid grid-cols-2 gap-3 mt-3 mb-6">
+        {/* Лента новинок. Стоит только в общем каталоге: в разделе покупатель
+            уже сузил выбор категорией, и лента «из другого» там мешает. */}
+        {!category && !search && newest.length > 0 && !loading && (
+          <section className="mt-4" aria-label="Новинки">
+            <div className="flex items-baseline justify-between mb-2">
+              <h2 className="t-section">Новое в магазине</h2>
+              <span className="t-brand">{newest.length} позиции</span>
+            </div>
+            {/* Полный bleed до краёв экрана: лента должна «уходить» за край,
+                иначе читается как обрезанный блок. Отступ слева — внутри
+                самого скролла, иначе первая карточка липла к краю. */}
+            <div className="no-scrollbar edge-fade news-rail -mx-4 px-4">
+              {newest.map((p) => (
+                <button
+                  key={p.id}
+                  className="news-card"
+                  onClick={() => {
+                    haptic("tap");
+                    props.onOpen(p.id);
+                  }}
+                  aria-label={`Открыть ${p.title}`}
+                >
+                  <div className="photo-frame">
+                    <ProductImage src={p.photoUrl} alt={p.title} priority />
+                  </div>
+                  <div className="name">{p.title}</div>
+                  <div className="flex items-baseline gap-1.5 flex-wrap">
+                    <span className="amount price">{money(p.price)}</span>
+                    {hasDiscount(p) && <span className="price-old">{money(p.oldPrice!)}</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Сетка товаров: линии вместо рамок у каждой карточки */}
+        <section className="shelf mt-4 mb-6" aria-label="Товары">
           {loading && products.length === 0
             ? Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="rounded-[14px] border border-rule overflow-hidden">
-                  <div className="aspect-square bg-[#f4f4f4]" />
-                  <div className="p-2.5 space-y-2">
-                    <div className="h-3 bg-[#f0f0f0] rounded" />
-                    <div className="h-3 w-1/2 bg-[#f0f0f0] rounded" />
-                  </div>
+                <div key={i} className="shelf-cell">
+                  <div className="photo-frame aspect-square rounded-[6px]" />
+                  <div className="h-2.5 w-12 bg-[#efefef] rounded mt-2.5" />
+                  <div className="h-3 w-full bg-[#f0f0f0] rounded mt-2" />
+                  <div className="h-3 w-1/2 bg-[#f0f0f0] rounded mt-1.5" />
                 </div>
               ))
             : products.map((p, index) => (
-                <article key={p.id} className="card text-left relative">
+                <article key={p.id} className="shelf-cell relative">
                   <button
                     onClick={() => {
                       haptic("tap");
@@ -336,13 +426,19 @@ export default function CatalogScreen(props: {
                     className="block w-full text-left"
                     aria-label={`Открыть ${p.title}`}
                   >
-                    <div className="aspect-square bg-[#f6f6f6]">
-                      <ProductImage src={p.photoUrl} alt={p.title} priority={index < 6} wrapperClassName="h-full w-full" />
+                    <div className="relative">
+                      <PhotoCarousel photos={p.photos?.length ? p.photos : [p.photoUrl]} title={p.title} priority={index < 4} />
+                      {/* Скидка — на фото, а не в строке цены: на узкой карточке
+                          «цена + старая цена + процент» переносились и рвали
+                          выравнивание сетки. */}
+                      {hasDiscount(p) && <span className="discount-badge">−{discountPercent(p)}%</span>}
                     </div>
-                    <div className="p-2.5 border-t border-rule">
-                      {p.brand && <div className="meta mb-0.5">{p.brand}</div>}
-                      <div className="text-[13px] font-semibold leading-snug line-clamp-2 min-h-[2.1em]">{p.title}</div>
-                      <div className="price text-[14px] mt-1.5">{money(p.price)}</div>
+
+                    {p.brand && <div className="t-brand mt-2.5">{p.brand}</div>}
+                    <div className="t-title line-clamp-2 mt-1 min-h-[2.64em]">{p.title}</div>
+                    <div className="flex items-baseline gap-1.5 whitespace-nowrap overflow-hidden">
+                      <span className="t-price-lg price shrink-0">{money(p.price)}</span>
+                      {hasDiscount(p) && <span className="price-old">{money(p.oldPrice!)}</span>}
                     </div>
                   </button>
 
@@ -351,13 +447,13 @@ export default function CatalogScreen(props: {
                     onClick={() => props.onToggleCompare(p.id)}
                     aria-pressed={props.compare.includes(p.id)}
                     aria-label={`Сравнить ${p.title}`}
-                    className={`absolute top-2 right-2 h-8 w-8 rounded-[10px] border flex items-center justify-center transition-colors ${
+                    className={`absolute top-2 right-2 h-7 w-7 rounded-[7px] border flex items-center justify-center transition-colors ${
                       props.compare.includes(p.id)
                         ? "bg-ink border-ink text-white"
-                        : "bg-paper/90 border-rule text-ink-2"
+                        : "bg-paper/85 border-rule text-ink-2"
                     }`}
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>
                       <path d="M4 7h10M4 17h10M17 4v16M13 11l4 2-4 2" />
                     </svg>
                   </button>
@@ -365,7 +461,7 @@ export default function CatalogScreen(props: {
               ))}
 
           {!loading && products.length === 0 && !error && (
-            <div className="col-span-2 border border-rule rounded-[14px] py-10 text-center">
+            <div className="col-span-2 bg-paper py-10 text-center">
               <p className="text-[13px] text-ink-2">Ничего не нашлось</p>
               <p className="meta mt-1">Попробуйте изменить запрос или сбросить фильтры</p>
               {activeFilters > 0 && (

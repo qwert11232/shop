@@ -65,7 +65,338 @@ body {
   }
 }
 
-/* ── компоненты ───────────────────────────────────────────────────────────── */
+
+/* ── типографическая шкала ─────────────────────────────────────────────────
+   Одна гарнитура, шесть ролей. Кегль — решение, а не побочный эффект:
+   цена крупнее названия, бренд мельче и капсом, тело текста только для чтения.
+   Значения продублированы в docs/DESIGN.md §Типографика. */
+.t-section {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.t-price-lg {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.t-price {
+  font-size: 14.5px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+}
+
+.t-title {
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.32;
+  letter-spacing: -0.005em;
+}
+
+.t-body {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+/* Бренд и служебные метки: капс, разрядка, третий уровень серого. */
+.t-brand {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+  line-height: 1.2;
+}
+
+.t-label {
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-2);
+}
+
+/* ── логотип ───────────────────────────────────────────────────────────────
+   Одно красное слово — единственная «краска» в шапке. Красный здесь работает
+   как знак бренда, а не как акцент: цена и главная кнопка остаются главными. */
+.masthead {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.masthead .signal {
+  color: var(--color-signal);
+}
+
+/* ── табы категорий ────────────────────────────────────────────────────────
+   Плашка-чип на каждой категории превращала первую строку экрана в набор
+   кнопок. Подчёркивание говорит «это лента разделов», а не «это фильтры». */
+.tab {
+  position: relative;
+  padding: 8px 0 9px;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--color-ink-2);
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.12s ease-in, border-color 0.12s ease-in;
+}
+.tab:hover {
+  color: var(--color-ink);
+}
+.tab.active {
+  color: var(--color-ink);
+  border-bottom-color: var(--color-signal);
+}
+
+/* ── фото товара ───────────────────────────────────────────────────────────
+   Единая подложка под кадры разной светлоты: студийные фото на белом не
+   проваливаются, тёмные не висят чёрным прямоугольником в серой плитке.
+   Кадр занимает всю плитку (object-cover), поэтому соседние карточки
+   выглядят одинаково «заполненными». */
+.photo-frame {
+  background: linear-gradient(160deg, #fbfbfa 0%, #f0efeb 100%);
+  overflow: hidden;
+}
+.photo-frame > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ── шапки экранов ─────────────────────────────────────────────────────────
+   Раньше шапка отделялась линией ink — самой контрастной линией на экране,
+   хотя служит она навигации, а не смыслу. Теперь rule, а смысл держат
+   типографика и красное слово в логотипе. */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--color-paper);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+/* ── ленты со скроллом ─────────────────────────────────────────────────────
+   Обрезанный край ленты читается как баг вёрстки. Мягкое затухание
+   показывает, что там ещё есть контент. */
+.edge-fade {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+}
+
+/* ── пустые состояния ──────────────────────────────────────────────────────
+   Пустой экран — единственное, что увидит новый покупатель в корзине.
+   Поэтому это не рамка с текстом, а блок с иконкой, объяснением и действием. */
+.empty {
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-card);
+  padding: 1.75rem 1.25rem;
+  text-align: center;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfbfa 100%);
+}
+.empty-icon {
+  width: 2.75rem;
+  height: 2.75rem;
+  margin: 0 auto 0.75rem;
+  border: 1px solid var(--color-rule);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--color-ink-2);
+  background: var(--color-paper);
+}
+
+/* ── сетка каталога ────────────────────────────────────────────────────────
+   Линии вместо рамок у каждой карточки: сетка читается одним полотном,
+   а не семнадцатью плашками. Стоимость — один gap 1px на весь список. */
+.shelf {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--color-rule);
+  border-top: 1px solid var(--color-rule);
+  border-bottom: 1px solid var(--color-rule);
+}
+.shelf-cell {
+  background: var(--color-paper);
+  padding: 10px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  min-width: 0;
+}
+.shelf-cell .t-price-lg,
+.shelf-cell .t-price {
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+/* Бейдж скидки поверх кадра: держит строку цены одной строкой. */
+.discount-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: var(--color-ink);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-radius: 3px;
+  padding: 2px 5px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* ── скидка ────────────────────────────────────────────────────────────────
+   Красный здесь уже занят ценой, поэтому процент скидки — инверсная плашка
+   ink на paper: она читается как ярлык, а не как второй акцент. */
+.discount-tag {
+  display: inline-block;
+  background: var(--color-ink);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-radius: 3px;
+  padding: 2px 4px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  align-self: center;
+}
+
+/* ── лента новинок ─────────────────────────────────────────────────────────
+   Горизонтальная лента карточек под шапкой каталога: покупатель видит, что
+   пришло в магазин, не открывая категории. Карточка ниже сетки по высоте,
+   потому что это анонс, а не полка. */
+.news-rail {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 2px;
+  /* Первый и последний кадр не липнут к краю экрана: отступ живёт в
+     scroll-padding, поэтому snap ставит карточку ровно, а не «под обрез». */
+  scroll-padding-left: 16px;
+}
+.news-card {
+  flex: 0 0 132px;
+  scroll-snap-align: start;
+  text-align: left;
+}
+.news-card .photo-frame {
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+}
+.news-card .name {
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  margin-top: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.news-card .amount {
+  font-size: 12.5px;
+  font-weight: 800;
+  margin-top: 3px;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Скидка: старая цена рядом с новой, зачёркнутая и тише. */
+.price-old {
+  color: var(--color-ink-3);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-decoration: line-through;
+  margin-left: 6px;
+}
+
+/* Акцентный блок первого экрана: кадр товара + белая плашка поверх. */
+.spotlight {
+  position: relative;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  /* Белая подложка, а не серая: большинство каталожных кадров сняты на белом,
+     и на белом же они растворяются в плашке без видимого прямоугольника. */
+  background: var(--color-paper);
+  border: 1px solid var(--color-rule);
+  display: block;
+  width: 100%;
+}
+/* object-fit: cover на карточке с объектом по центру обрезал края кадра, а на
+   вытянутых кадрах оставлял белые полосы по бокам. Поэтому кадр вписывается
+   целиком на мягкую подложку — так одинаково выглядят и широкие, и квадратные
+   фото, и ни одно не теряет содержимое. */
+.spotlight img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 10px 10px 34px;
+}
+.spotlight-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-ink);
+  border-radius: 4px;
+  padding: 5px 9px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.spotlight-plate {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  background: var(--color-paper);
+  border-radius: 6px;
+  padding: 8px 11px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.spotlight-plate .name {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.spotlight-plate .amount {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--color-signal);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+@layer components {
+/* ── компоненты ─────────────────────────────────────────────────────────────
+   Всё ниже — в @layer components, чтобы утилиты Tailwind (pl-9, !py-1.5)
+   выигрывали у компонентных классов. Без слоя .input{ padding } перебивал
+   pl-9 по порядку в бандле, и иконка поиска налезала на плейсхолдер. */
 .font-display {
   font-family: var(--font-display);
   letter-spacing: -0.02em;
@@ -237,6 +568,7 @@ body {
 .icon-btn:hover {
   background: #f2f2f2;
 }
+}
 
 @keyframes slideUp {
   from {
@@ -256,6 +588,7 @@ body {
     opacity: 1;
   }
 }
+
 
 /* ── витрина: микроанимации экранов ────────────────────────────────────────
    fade-in при появлении экрана, slide-up у панели фильтров и тоста.

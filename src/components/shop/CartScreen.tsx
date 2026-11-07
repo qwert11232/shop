@@ -65,10 +65,19 @@ export default function CartScreen(props: {
     return (
       <div className="px-4">
         <ScreenHeader title="Корзина" />
-        <div className="border border-rule rounded-[14px] py-12 text-center mt-4">
-          <p className="text-[14px] font-semibold">Корзина пуста</p>
-          <p className="meta mt-1">Добавьте технику из каталога — она сохранится до оформления</p>
-          <button className="btn-primary mt-4 mx-auto" onClick={props.onCatalog}>В каталог</button>
+        <div className="empty mt-4">
+          <div className="empty-icon" aria-hidden>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 4h2.2l2.3 10.4a1.6 1.6 0 001.6 1.3h8.5a1.6 1.6 0 001.6-1.3L21 7H6" />
+              <circle cx="9.5" cy="19.5" r="1.25" />
+              <circle cx="17.5" cy="19.5" r="1.25" />
+            </svg>
+          </div>
+          <p className="t-section">Корзина пуста</p>
+          <p className="meta mt-1.5 max-w-[24ch] mx-auto">
+            Отложите технику из каталога — она дождётся оформления, даже если закроете Telegram
+          </p>
+          <button className="btn-primary mt-4" onClick={props.onCatalog}>Перейти в каталог</button>
         </div>
       </div>
     );
@@ -90,11 +99,11 @@ export default function CartScreen(props: {
             disabled={busyKey === `${line.productId}:${line.variantId ?? ""}`}
           >
             <div className="flex gap-2.5 p-2.5 bg-paper">
-              <div className="h-[68px] w-[68px] shrink-0 rounded-[10px] bg-[#f6f6f6]">
-                <ProductImage src={line.photoUrl} alt={line.title} className="h-full w-full object-contain p-1" />
+              <div className="photo-frame h-[68px] w-[68px] shrink-0 rounded-[8px]">
+                <ProductImage src={line.photoUrl} alt={line.title} className="h-full w-full object-contain p-2" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-semibold leading-snug line-clamp-2">{line.title}</div>
+                <div className="t-title line-clamp-2">{line.title}</div>
                 {line.variantLabel && <div className="meta mt-0.5">{line.variantLabel}</div>}
                 <div className="flex items-end gap-2 mt-1.5">
                   <Stepper
@@ -103,7 +112,7 @@ export default function CartScreen(props: {
                     disabled={busyKey === `${line.productId}:${line.variantId ?? ""}`}
                   />
                   <span className="flex-1" />
-                  <span className="price text-[14px]">{money(line.lineTotal)}</span>
+                  <span className="price t-price">{money(line.lineTotal)}</span>
                 </div>
               </div>
             </div>
@@ -138,7 +147,7 @@ export default function CartScreen(props: {
 
 function ScreenHeader({ title }: { title: string }) {
   return (
-    <header className="sticky top-0 z-20 bg-paper border-b border-ink -mx-4 px-4 py-2.5">
+    <header className="app-header -mx-4 px-4 py-2.5">
       <span className="font-display font-bold text-[15px]">{title}</span>
     </header>
   );

@@ -22,7 +22,12 @@ import {
 } from "@/lib/bot-screens";
 import {
   bonusAskScreen,
+  bulkCategoryScreen,
+  bulkScreen,
   categoryPickScreen,
+  parsePricePercent,
+  paymentPromptScreen,
+  paymentScreen,
   createdScreen,
   customerScreen,
   customersScreen,
@@ -30,7 +35,12 @@ import {
   draftFieldPrompt,
   draftScreen,
   galleryScreen,
+  bulkPricePromptScreen,
+  bulkPriceResultText,
   orderAdminScreen,
+  orderSearchPromptScreen,
+  orderSearchResultScreen,
+  queueScreen,
   productAdminScreen,
   productsListScreen,
   specsAskScreen,
@@ -40,11 +50,24 @@ import {
   variantsScreen,
   type Draft,
 } from "@/lib/bot-screens-admin";
-import { buildOrderMessage, userLabel } from "@/lib/telegram";
+import { buildOrderMessage, notifyCustomer, userLabel } from "@/lib/telegram";
+import {
+  SETTING_DEFS,
+  getSettings,
+  isSettingKey,
+  parsePaymentLink,
+  paymentConfigured,
+  setSetting,
+} from "@/lib/settings";
+import { bulkReprice, bulkSetActive, categoryVisibility } from "@/lib/bot-admin-flow";
+import { parsePhone } from "@/lib/bot-input";
 import { withDeliveryLine, withStatusLine } from "@/lib/order-message";
 import {
   clearBotSession,
   countsForBot,
+  listOrdersByDelivery,
+  orderQueueCounts,
+  searchOrders,
   getOrderById,
   getProductById,
   isOrderStatus,
@@ -58,7 +81,17 @@ import {
   updateProduct,
   type OrderStatus,
 } from "@/lib/repo";
-import { deliveryLabel, isDeliveryStatus, listCustomers, listOrderItems, setDeliveryStatus, getCustomer, listMyOrders } from "@/lib/shop";
+import {
+  deliveryLabel,
+  isDeliveryStatus,
+  listCustomers,
+  listOrderItems,
+  setDeliveryStatus,
+  getCustomer,
+  listMyOrders,
+  trackAllowed,
+  customerStatusNotice,
+} from "@/lib/shop";
 import {
   addGalleryImage,
   addGalleryVideo,
@@ -203,7 +236,7 @@ async function handleMessage(message: BotMessage): Promise<void> {
 
   switch (command) {
     case "/start":
-      await render(chatId, await menuScreen(await countsForBot()));
+      await render(chatId, await mainMenu());
       return;
     case "/orders":
       await render(chatId, ordersScreen(await listOrdersByStatus("new", 10), "new"));
@@ -224,8 +257,42 @@ async function handleMessage(message: BotMessage): Promise<void> {
       await render(chatId, customersScreen(await listCustomers(20)));
       return;
     default:
-      await render(chatId, await menuScreen(await countsForBot()));
+      await render(chatId, await mainMenu());
   }
+}
+
+/**
+ * Главный экран: три очереди работы + сводка. Собирается в одном месте, чтобы
+ * `/start`, кнопка «‹ Меню» и возврат после действия показывали одно и то же.
+ */
+async function mainMenu(): Promise<Screen> {
+  const counts = await countsForBot();
+  const queues = await orderQueueCounts();
+  const settings = await getSettings();
+  return menuScreen({
+    newOrders: queues.awaitingConfirm,
+    awaitingPayment: queues.awaitingPayment,
+    awaitingShipment: queues.awaitingShipment,
+    activeProducts: counts.activeProducts,
+    revenueDone: counts.revenueDone,
+    paymentConfigured: paymentConfigured(settings),
+  });
+}
+
+/**
+ * Уведомление клиенту о шаге заказа — всегда с актуальными реквизитами:
+ * владелец мог поменять карту между заказами.
+ */
+async function notifyOrderStep(order: Parameters<typeof customerStatusNotice>[0]): Promise<boolean> {
+  const settings = await getSettings();
+  const notice = customerStatusNotice(order, {
+    details: settings.payment_details,
+    link: settings.payment_link,
+    note: settings.payment_note,
+    phone: settings.shop_phone,
+  });
+  if (!notice) return true;
+  return notifyCustomer(order.tgUserId ?? null, notice);
 }
 
 async function statsScreenFor(): Promise<Screen> {
@@ -293,6 +360,17 @@ async function handleSessionInput(chatId: number, kind: string, payload: string,
         await sendMessage(chatId, "Заявка не найдена — возможно, её удалили.");
         return;
       }
+      // Трек имеет смысл только у отправленного заказа: иначе клиент увидит
+      // номер рядом со статусом «Ожидает оплаты» и решит, что посылка в пути.
+      if (!trackAllowed(order.deliveryStatus)) {
+        await clearBotSession(chat);
+        await sendMessage(
+          chatId,
+          "Трек-номер ставится после отправки. Сначала переведите заказ в статус «Отправлено».",
+        );
+        await showOrder(chatId, order.id);
+        return;
+      }
       const track = normalizeTrack(text);
       if (!track) {
         await sendMessage(chatId, "Нужен трек-номер из 4–40 символов: латиница, цифры, дефис. Например: RU123456789.");
@@ -301,6 +379,9 @@ async function handleSessionInput(chatId: number, kind: string, payload: string,
       }
       await setDeliveryStatus(order.id, isDeliveryStatus(order.deliveryStatus) ? order.deliveryStatus : "new", track);
       await showOrder(chatId, order.id);
+      // Клиенту трек нужен сразу, а не когда он зайдёт в кабинет.
+      const updated = await getOrderById(order.id);
+      if (updated) await notifyOrderStep(updated);
       return;
     }
 
@@ -422,6 +503,88 @@ async function handleSessionInput(chatId: number, kind: string, payload: string,
       return;
     }
 
+    // ── Реквизиты оплаты: текст сохраняется, «-» стирает ────────────────────
+    case "payset": {
+      if (!isSettingKey(payload)) {
+        await render(chatId, await mainMenu());
+        return;
+      }
+      const def = SETTING_DEFS.find((item) => item.key === payload);
+      const clear = text.trim() === "-" || text.trim() === "—";
+      if (!clear && def && text.trim().length > def.maxLength) {
+        await sendMessage(chatId, `Слишком длинно: до ${def.maxLength} символов. Сократите и пришлите ещё раз.`);
+        await setBotSession({ chatId: chat, kind: "payset", payload });
+        return;
+      }
+      let value = clear ? "" : text.trim();
+      if (payload === "payment_link" && !clear) {
+        const parsed = parsePaymentLink(value);
+        if (!parsed.ok) {
+          await sendMessage(
+            chatId,
+            `${parsed.reason}
+Пришлите ссылку ещё раз или «-», чтобы стереть.`,
+          );
+          await setBotSession({ chatId: chat, kind: "payset", payload });
+          return;
+        }
+        value = parsed.url;
+      }
+      if (payload === "shop_phone" && !clear) {
+        const phone = parsePhone(value);
+        if (!phone) {
+          await sendMessage(chatId, "Нужен номер телефона: например +7 900 000-00-00. Или «-», чтобы стереть.");
+          await setBotSession({ chatId: chat, kind: "payset", payload });
+          return;
+        }
+        value = phone;
+      }
+      await setSetting(payload, value);
+      await clearBotSession(chat);
+      await render(chatId, paymentScreen(await getSettings()));
+      return;
+    }
+
+    // ── Процент для массового изменения цен ────────────────────────────────
+    case "bulkprice": {
+      const percent = parsePricePercent(text);
+      if (percent === null) {
+        await sendMessage(
+          chatId,
+          "Нужен процент от −50 до +50: например <code>+5</code> или <code>-10</code>. Без процента цена не изменится.",
+        );
+        await setBotSession({ chatId: chat, kind: "bulkprice", payload });
+        return;
+      }
+      const categories = await listCategoriesAdmin();
+      const category = categories.find((item) => item.id === payload);
+      if (!category) {
+        await clearBotSession(chat);
+        await render(chatId, await mainMenu());
+        return;
+      }
+      const changed = await bulkReprice(category.id, percent);
+      await clearBotSession(chat);
+      await render(chatId, {
+        text: bulkPriceResultText(category.name, percent, changed.affected, changed.total),
+        keyboard: {
+          inline_keyboard: [
+            [{ text: "‹ К категории", callback_data: `bulkcat:${category.id}` }],
+            [{ text: "‹ Меню", callback_data: "menu" }],
+          ],
+        },
+      });
+      return;
+    }
+
+    // ── Поиск заказа по номеру / телефону / имени ──────────────────────────
+    case "ofind": {
+      const found = await searchOrders(text);
+      await clearBotSession(chat);
+      await render(chatId, orderSearchResultScreen(text.trim(), found));
+      return;
+    }
+
     // ── Бонусы ─────────────────────────────────────────────────────────────
     case "bonus": {
       const result = await applyBonus(payload, text);
@@ -469,6 +632,7 @@ function fieldLabel(field: string): string {
   const labels: Record<string, string> = {
     title: "Название",
     price: "Цена",
+    sale: "Скидка",
     brand: "Бренд",
     desc: "Описание",
     photo: "Фото",
@@ -580,7 +744,7 @@ async function handleCallback(update: BotUpdate): Promise<void> {
   switch (action) {
     case "menu":
       await answerCallback(query.id);
-      await render(chatId, await menuScreen(await countsForBot()), messageId);
+      await render(chatId, await mainMenu(), messageId);
       return;
 
     case "stats":
@@ -600,6 +764,124 @@ async function handleCallback(update: BotUpdate): Promise<void> {
     case "order": {
       await answerCallback(query.id);
       await showOrder(chatId, arg, messageId);
+      return;
+    }
+
+    // ── Очереди работы: ждут оплаты / отправки ─────────────────────────────
+    // Отдельный экран, потому что фильтр «новые» по CRM-статусу не показывает
+    // заказы, которые уже подтверждены, но ещё не оплачены.
+    case "queue": {
+      await answerCallback(query.id);
+      const status = arg === "paid" ? "paid" : "confirmed";
+      const orders = await listOrdersByDelivery(status, 10);
+      await render(chatId, queueScreen(orders, status), messageId);
+      return;
+    }
+
+    // ── Оплата: реквизиты и ссылка ─────────────────────────────────────────
+    case "pay": {
+      await answerCallback(query.id);
+      await render(chatId, paymentScreen(await getSettings()), messageId);
+      return;
+    }
+
+    case "payset": {
+      if (!isSettingKey(arg)) {
+        await answerCallback(query.id, "Неизвестная настройка");
+        return;
+      }
+      await answerCallback(query.id);
+      await render(chatId, paymentPromptScreen(arg), messageId);
+      await setBotSession({ chatId: chat, kind: "payset", payload: arg });
+      return;
+    }
+
+    // ── Массовые действия ──────────────────────────────────────────────────
+    // bulk:hide:<catId> | bulk:show:<catId> | bulk:price:<catId> — выполняем сразу,
+    // кроме цены: процент ещё нужно ввести.
+    case "bulk": {
+      // Кнопка «Массовые действия» на экране товаров приходит без аргумента:
+      // показываем список категорий, иначе разбор ":" ниже даёт «не найдена».
+      if (!arg) {
+        await answerCallback(query.id);
+        await render(chatId, bulkScreen(await listCategoriesAdmin()), messageId);
+        return;
+      }
+      const [kind, categoryId] = arg.split(":");
+      const categories = await listCategoriesAdmin();
+      const category = categories.find((item) => item.id === categoryId);
+      if (!category) {
+        await answerCallback(query.id, "Категория не найдена", true);
+        return;
+      }
+      if (kind === "price") {
+        await answerCallback(query.id);
+        await render(chatId, bulkPricePromptScreen(category), messageId);
+        await setBotSession({ chatId: chat, kind: "bulkprice", payload: category.id });
+        return;
+      }
+      const active = kind === "show";
+      const result = await bulkSetActive(category.id, active);
+      const counts = await categoryVisibility(category.id);
+      await answerCallback(
+        query.id,
+        result.affected === 0
+          ? active
+            ? "Все товары уже на витрине"
+            : "Все товары уже скрыты"
+          : `${active ? "Показано" : "Скрыто"}: ${result.affected}`,
+      );
+      await render(chatId, bulkCategoryScreen(category, counts), messageId);
+      return;
+    }
+
+    // bulkdo:<catId>:<percent> — быстрый процент кнопкой (+5 / +10)
+    case "bulkdo": {
+      const [categoryId, percentRaw] = arg.split(":");
+      const percent = parsePricePercent(percentRaw);
+      const categories = await listCategoriesAdmin();
+      const category = categories.find((item) => item.id === categoryId);
+      if (!percent || !category) {
+        await answerCallback(query.id, "Не понял процент", true);
+        return;
+      }
+      const result = await bulkReprice(category.id, percent);
+      await answerCallback(query.id, `Изменено: ${result.affected}`);
+      await render(
+        chatId,
+        {
+          text: bulkPriceResultText(category.name, percent, result.affected, result.total),
+          keyboard: {
+            inline_keyboard: [
+              [{ text: "‹ К категории", callback_data: `bulkcat:${category.id}` }],
+              [{ text: "‹ Меню", callback_data: "menu" }],
+            ],
+          },
+        },
+        messageId,
+      );
+      return;
+    }
+
+    case "bulkcat": {
+      const categories = await listCategoriesAdmin();
+      const category = categories.find((item) => item.id === arg);
+      await answerCallback(query.id);
+      if (!category) {
+        await sendMessage(chatId, "Категория не найдена.");
+        await render(chatId, bulkScreen(categories), messageId);
+        return;
+      }
+      const counts = await categoryVisibility(category.id);
+      await render(chatId, bulkCategoryScreen(category, counts), messageId);
+      return;
+    }
+
+    // ── Поиск заказа по номеру / телефону ──────────────────────────────────
+    case "ofind": {
+      await answerCallback(query.id);
+      await render(chatId, orderSearchPromptScreen(), messageId);
+      await setBotSession({ chatId: chat, kind: "ofind", payload: "" });
       return;
     }
 
@@ -635,10 +917,15 @@ async function handleCallback(update: BotUpdate): Promise<void> {
         return;
       }
       const order = await getOrderById(orderId);
-      await answerCallback(query.id, `Доставка: ${deliveryLabel(next)}`);
+      await answerCallback(query.id, `Статус: ${deliveryLabel(next)}`);
       if (order) {
         await showOrder(chatId, orderId, messageId);
         await syncGroupStatus(order, (order.status as OrderStatus) ?? "new", query.from.first_name, next);
+        // Клиент получает сообщение на каждый шаг: он уже вышел из Mini App.
+        const delivered = await notifyOrderStep(order);
+        if (!delivered) {
+          await answerCallback(query.id, "Клиенту не отправлено: бот заблокирован или ID нет", true);
+        }
       }
       return;
     }
@@ -648,6 +935,11 @@ async function handleCallback(update: BotUpdate): Promise<void> {
       await answerCallback(query.id);
       if (!order) {
         await sendMessage(chatId, "Заявка не найдена.");
+        return;
+      }
+      if (!trackAllowed(order.deliveryStatus)) {
+        await answerCallback(query.id, "Сначала отметьте «Отправлено»", true);
+        await sendMessage(chatId, "Трек-номер ставится после отправки: сначала нажмите «Отправлено».");
         return;
       }
       await render(chatId, trackPromptScreen(order), messageId);
@@ -960,7 +1252,7 @@ async function handleCallback(update: BotUpdate): Promise<void> {
     default:
       await answerCallback(query.id);
       await clearBotSession(chat);
-      await render(chatId, await menuScreen(await countsForBot()), messageId);
+      await render(chatId, await mainMenu(), messageId);
   }
 }
 

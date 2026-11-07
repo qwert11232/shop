@@ -10,6 +10,12 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 
+async function dbAllFlow(orderId: string): Promise<{ status: string }[]> {
+  const { getDb } = await import("../src/lib/db");
+  const db = await getDb();
+  return db.all<{ status: string }>("SELECT status FROM order_events WHERE order_id = ? ORDER BY created_at", [orderId]);
+}
+
 function assert(cond: unknown, message: string) {
   if (!cond) {
     console.error(`[check:bot] FAIL — ${message}`);
@@ -50,14 +56,44 @@ async function main() {
   delete process.env.OWNER_TELEGRAM_ID;
 
   // ── Экраны ────────────────────────────────────────────────────────────────
-  const menu = screens.menuScreen({ newOrders: 3, activeProducts: 17, revenueDone: 17998000 });
-  assert(menu.text.includes("Новых заявок: <b>3</b>"), "меню показывает число новых заявок");
+  const menu = screens.menuScreen({
+    newOrders: 3,
+    awaitingPayment: 2,
+    awaitingShipment: 1,
+    activeProducts: 17,
+    revenueDone: 17998000,
+    paymentConfigured: false,
+  });
+  assert(menu.text.includes("Подтвердить: <b>3</b>"), "меню показывает очередь на подтверждение");
+  assert(menu.text.includes("Ждут оплаты: <b>2</b>"), "меню показывает очередь ожидания оплаты");
+  assert(menu.text.includes("Отправить: <b>1</b>"), "меню показывает очередь отправки");
+  assert(menu.text.includes("Оплата не настроена"), "без реквизитов меню предупреждает владельца");
   // toLocaleString вставляет NBSP (U+00A0) — сравниваем, не завися от вида пробела.
   const flat = (value: string) => value.replace(/\u00a0|\u202f/g, " ");
   assert(flat(menu.text).includes("179 980 ₽"), "меню показывает выручку в рублях");
   const flatButtons = menu.keyboard!.inline_keyboard.flat();
   assert(flatButtons.some((b) => "callback_data" in b && b.callback_data === "orders:new"), "в меню есть кнопка заявок");
   assert(flatButtons.some((b) => "url" in b && b.url.startsWith("http")), "в меню есть кнопка витрины");
+  assert(
+    flatButtons.some((b) => "callback_data" in b && b.callback_data === "queue:confirmed"),
+    "в меню есть переход к очереди оплаты",
+  );
+  assert(
+    flatButtons.some((b) => "callback_data" in b && b.callback_data === "pay"),
+    "в меню есть настройка оплаты",
+  );
+
+  // Без срочных дел меню не пугает цифрами нулей.
+  const calmMenu = screens.menuScreen({
+    newOrders: 0,
+    awaitingPayment: 0,
+    awaitingShipment: 0,
+    activeProducts: 17,
+    revenueDone: 0,
+    paymentConfigured: true,
+  });
+  assert(calmMenu.text.includes("Срочных дел нет"), "пустые очереди дают спокойный текст");
+  assert(!calmMenu.text.includes("Оплата не настроена"), "настроенная оплата не даёт предупреждения");
 
   assert(screens.esc('<b>x</b>') === "&lt;b&gt;x&lt;/b&gt;", "пользовательский текст экранируется");
   const emptyOrders = screens.ordersScreen([], "new");
@@ -116,19 +152,36 @@ async function main() {
   const cardBefore = adminScreensEarly.orderAdminScreen((await repo.getOrderById(order.id))!, []);
   const deliveryButtons = cardBefore.keyboard.inline_keyboard.flat();
   assert(
-    deliveryButtons.some((b) => "callback_data" in b && b.callback_data === `delivery:${order.id}:packing`),
-    "в карточке заявки есть кнопка статуса доставки",
+    deliveryButtons.some((b) => "callback_data" in b && b.callback_data === `delivery:${order.id}:confirmed`),
+    "в карточке заявки есть кнопка «Подтвердить заказ»",
+  );
+  const trackButton = deliveryButtons.find((b) => "callback_data" in b && b.callback_data === `track:${order.id}`);
+  assert(
+    trackButton && "text" in trackButton && trackButton.text.includes("после отправки"),
+    "до отправки кнопка трека честно говорит, что трек ставится после отправки",
   );
   assert(
-    deliveryButtons.some((b) => "callback_data" in b && b.callback_data === `track:${order.id}`),
-    "в карточке заявки есть кнопка трек-номера",
+    cardBefore.text.includes("Ожидает подтверждения"),
+    "в карточке виден статус клиента: ожидает подтверждения",
   );
   assert(
     deliveryButtons.some((b) => "callback_data" in b && b.callback_data === `ocomment:${order.id}`),
     "в карточке заявки есть кнопка комментария клиенту",
   );
-  assert(admin.nextDeliveryStep("packing") === "shipped", "следующий шаг доставки: передан в доставку");
-  assert(admin.nextDeliveryStep("done") === null, "после получения шагов больше нет");
+  // Путь заказа: ожидает → подтверждён → оплачен → отправлен → получен.
+  const status = await import("../src/lib/order-status");
+  assert(status.nextDeliveryStep("new") === "confirmed", "после заявки шаг «подтвердить заказ»");
+  assert(status.nextDeliveryStep("confirmed") === "paid", "после подтверждения шаг «оплата получена»");
+  assert(status.nextDeliveryStep("paid") === "shipped", "после оплаты шаг «отправлено»");
+  assert(status.nextDeliveryStep("packing") === "shipped", "исторический packing ведёт к отправке");
+  assert(status.nextDeliveryStep("shipped") === "done", "после отправки шаг «получено»");
+  assert(status.nextDeliveryStep("done") === null, "после получения шагов больше нет");
+  assert(status.deliveryLabel("new") === "Ожидает подтверждения", "клиент видит «ожидает подтверждения»");
+  assert(status.deliveryLabel("paid") === "Ожидает отправки", "после оплаты — «ожидает отправки»");
+  assert(status.deliveryLabel("shipped") === "Отправлено", "оправленный заказ — «отправлено»");
+  assert(!status.trackAllowed("confirmed"), "трек нельзя ставить до отправки");
+  assert(status.trackAllowed("shipped"), "трек доступен после отправки");
+  assert(admin.nextActionLabel("confirmed", "paid") === "Оплата получена", "кнопка называется действием, а не статусом");
 
   assert(await shop.setDeliveryStatus(order.id, "shipped"), "статус доставки меняется");
   const shipped = (await repo.getOrderById(order.id))!;
@@ -143,7 +196,7 @@ async function main() {
   assert(withTrack.trackNumber === "RU123-456789", "трек-номер сохранён");
   const cardWithTrack = adminScreensEarly.orderAdminScreen(withTrack, []);
   assert(cardWithTrack.text.includes("RU123-456789"), "карточка показывает трек-номер клиенту-админу");
-  assert(cardWithTrack.text.includes("Ждёт в ПВЗ"), "карточка показывает человеческий статус доставки");
+  assert(cardWithTrack.text.includes("Готов к выдаче"), "карточка показывает человеческий статус доставки («Готов к выдаче»)");
 
   const prompt = screens.trackPromptScreen(withTrack);
   assert(prompt.text.includes(order.id), "подсказка трека называет заявку");
@@ -352,6 +405,237 @@ async function main() {
   assert(tg.ordersReceiverConfigured(), "с группой заказ уходит в группу");
   delete process.env.GROUP_CHAT_ID;
   delete process.env.BOT_TOKEN;
+
+  // ── Путь заказа: уведомление → подтверждение → оплата → отправка → трек ────
+  // Сценарий клиента: заказ создан, админ ведёт его по шагам, клиенту на каждый
+  // шаг приходит текст, а трек нельзя поставить раньше отправки.
+  assert(status.customerStatusNotice({ id: "o", total: 100, deliveryStatus: "new" }) === null,
+    "на новую заявку клиенту не шлём — это ответ на его же действие");
+  const noticeConfirmed = status.customerStatusNotice({ id: "o1", total: 8999000, deliveryStatus: "confirmed" });
+  assert(noticeConfirmed?.includes("подтверждён") && noticeConfirmed.includes("89 990"), "клиент узнаёт о подтверждении и сумме");
+  const noticePaid = status.customerStatusNotice({ id: "o1", total: 8999000, deliveryStatus: "paid" });
+  assert(noticePaid?.includes("ожидает отправки"), "после оплаты клиент видит «ожидает отправки»");
+  const noticeShipped = status.customerStatusNotice({ id: "o1", total: 100, deliveryStatus: "shipped", trackNumber: "RU123" });
+  assert(noticeShipped?.includes("отправлен") && noticeShipped.includes("RU123"), "об отправке приходит сообщение с треком");
+  const noticeCancelled = status.customerStatusNotice({ id: "o1", total: 100, deliveryStatus: "cancelled", comment: "нет в наличии" });
+  assert(noticeCancelled?.includes("отменён") && noticeCancelled.includes("нет в наличии"), "об отмене сообщаем с причиной");
+  assert(noticeCancelled?.includes("бонусы"), "при отмене напоминаем про возврат бонусов");
+
+  // Сквозной путь по базе: new → confirmed → paid → shipped → done + трек.
+  const realProduct = await repo.listProductsAdmin();
+  const flowItem = realProduct[0];
+  const flowOrder = await shop.createPurchaseOrder({
+    tgUserId: "888",
+    contactName: "Путь",
+    contactPhone: "+79990000000",
+    comment: "",
+    bonusToUse: 0,
+    total: 100000,
+    items: [{ productId: flowItem.id, quantity: 1 }],
+  });
+  assert(flowOrder.deliveryStatus === "new", "новый заказ начинается со статуса «ожидает подтверждения»");
+  assert(status.deliveryLabel(flowOrder.deliveryStatus) === "Ожидает подтверждения", "клиент видит понятную подпись");
+  assert(await shop.setDeliveryStatus(flowOrder.id, "confirmed"), "админ подтверждает заказ");
+  assert(await shop.setDeliveryStatus(flowOrder.id, "paid"), "админ отмечает оплату");
+  assert(await shop.setDeliveryStatus(flowOrder.id, "shipped", "RU999888777"), "админ отправляет заказ с треком");
+  const shippedFlow = (await shop.listMyOrders("888")).find((o) => o.id === flowOrder.id)!;
+  assert(shippedFlow.deliveryStatus === "shipped" && shippedFlow.trackNumber === "RU999888777",
+    "клиент в кабинете видит статус «Отправлено» и трек-номер");
+  assert(status.deliveryStepIndex("shipped") === 3, "на полосе прогресса отправка — четвёртый шаг");
+  assert(status.deliveryStepIndex("cancelled") === -1, "у отменённого заказа прогресс не рисуется");
+  const history = await dbAllFlow(flowOrder.id);
+  // Оформление пишет событие `new` (клиент), дальнейшие шаги — по одному на действие.
+  assert(history.length === 4, `каждый шаг пишется в историю заказа (${history.length} события)`);
+  assert(["new", "confirmed", "paid", "shipped"].every((st) => history.some((h) => h.status === st)),
+    "в истории есть оформление, подтверждение, оплата и отправка");
+
+  // ── Оплата: настройки, ссылка, реквизиты в сообщении клиенту ─────────────
+  const settings = await import("../src/lib/settings");
+  const emptySettings = await settings.getSettings();
+  assert(!settings.paymentConfigured(emptySettings), "по умолчанию оплата не настроена");
+  await settings.setSetting("payment_details", "  СБП по номеру +7 900 111-22-33  ");
+  // Ссылка нормализуется так же, как это делает панель при вводе.
+  const normalized = settings.parsePaymentLink("pay.example.com/order");
+  assert(normalized.ok, "ссылка на оплату разбирается");
+  await settings.setSetting("payment_link", normalized.ok ? normalized.url : "");
+  const saved = await settings.getSettings();
+  assert(saved.payment_details === "СБП по номеру +7 900 111-22-33", "реквизиты сохранены без лишних пробелов");
+  assert(settings.paymentConfigured(saved), "после реквизитов оплата считается настроенной");
+
+  assert(!settings.parsePaymentLink("").ok, "пустая ссылка отклоняется");
+  assert(!settings.parsePaymentLink("pay me now").ok, "ссылка с пробелом отклоняется");
+  assert(!settings.parsePaymentLink("localhost").ok, "адрес без домена отклоняется");
+  const parsedLink = settings.parsePaymentLink("pay.example.com/o/123");
+  assert(parsedLink.ok && parsedLink.url === "https://pay.example.com/o/123", "ссылка дополняется https://");
+
+  await settings.setSetting("payment_details", "");
+  assert((await settings.getSettings()).payment_details === "", "пустое значение стирает настройку");
+  await settings.setSetting("payment_details", "Карта 2200 0000 0000 0000");
+
+  // Клиент получает реквизиты вместе с подтверждением и ссылку — если задана.
+  const payInfo = {
+    details: saved.payment_details,
+    link: saved.payment_link,
+    note: "Чек пришлём в чат",
+    phone: "+7 900 111-22-33",
+  };
+  const confirmedNotice = status.customerStatusNotice(
+    { id: "o-pay", total: 129900, deliveryStatus: "confirmed" },
+    payInfo,
+  );
+  assert(confirmedNotice?.includes("СБП по номеру"), "в подтверждении есть реквизиты");
+  assert(confirmedNotice?.includes("https://pay.example.com/order"), "в подтверждении есть ссылка на оплату");
+  assert(confirmedNotice?.includes("Чек пришлём"), "приписка к оплате доходит до клиента");
+  assert(confirmedNotice?.includes("+7 900 111-22-33"), "телефон магазина виден клиенту");
+  const noPayNotice = status.customerStatusNotice({ id: "o-pay", total: 100, deliveryStatus: "confirmed" });
+  assert(noPayNotice?.includes("пришлём реквизиты"), "без настроек клиент не остаётся без инструкции");
+
+  const payScreen = adminScreens.paymentScreen(saved);
+  assert(payScreen.text.includes("СБП по номеру"), "экран оплаты показывает сохранённые реквизиты");
+  const payButtons = payScreen.keyboard.inline_keyboard.flat();
+  assert(
+    payButtons.some((b) => "callback_data" in b && b.callback_data === "payset:payment_link"),
+    "в экране оплаты можно изменить ссылку",
+  );
+
+  // ── Скидка через бота ────────────────────────────────────────────────────
+  // Владелец думает процентом, а не старой ценой: присылает «10» — бот
+  // выставляет зачёркнутую цену так, чтобы скидка была ровно 10%.
+  {
+    const saleTarget = (await repo.listProductsAdmin()).find((p) => p.isActive)!;
+    const basePrice = saleTarget.price;
+    const byPercent = await flow.applyProductField(saleTarget.id, "sale", "10");
+    assert(byPercent.ok, "скидку можно задать процентом");
+    assert(
+      byPercent.product!.oldPrice > byPercent.product!.price,
+      `после «10» появилась старая цена (${byPercent.product!.oldPrice / 100} ₽ при ${basePrice / 100} ₽)`,
+    );
+    const shownPercent = Math.round(
+      (1 - byPercent.product!.price / byPercent.product!.oldPrice) * 100,
+    );
+    assert(shownPercent === 10, `витрина покажет ровно −10% (получилось −${shownPercent}%)`);
+
+    const tooMuch = await flow.applyProductField(saleTarget.id, "sale", "80");
+    assert(!tooMuch.ok, "скидка больше 50% не принимается");
+    assert((tooMuch.error ?? "").includes("50"), "и объясняет предел, а не молчит");
+
+    const byOldPrice = await flow.applyProductField(saleTarget.id, "sale", `${Math.round(basePrice * 1.5 / 100)}`);
+    assert(byOldPrice.ok, "скидку можно задать старой ценой");
+    assert(
+      byOldPrice.product!.oldPrice > basePrice,
+      "старая цена из ввода выше текущей",
+    );
+
+    const lower = await flow.applyProductField(saleTarget.id, "sale", "1");
+    assert(!lower.ok || lower.product!.oldPrice > lower.product!.price, "старая цена не может быть ниже текущей");
+
+    const cleared = await flow.applyProductField(saleTarget.id, "sale", "0");
+    assert(cleared.ok && cleared.product!.oldPrice === 0, "«0» снимает скидку");
+    assert(cleared.product!.price === basePrice, "снятие скидки не меняет цену клиента");
+
+    const productScreen = adminScreens.productAdminScreen({ ...cleared.product!, categoryName: "Тест" });
+    assert(
+      productScreen.keyboard.inline_keyboard.flat().some((b) => "callback_data" in b && b.callback_data === `edit:${saleTarget.id}:sale`),
+      "в карточке товара есть кнопка «Скидка»",
+    );
+    const prompt = screens.fieldPrompt("sale", cleared.product!);
+    assert(prompt.text.includes("%") && prompt.text.includes("0"), "подсказка объясняет процент и снятие скидки");
+  }
+
+  // ── Массовые действия ────────────────────────────────────────────────────
+  const bulkCategories = await repo.listCategoriesAdmin();
+  const bulkTarget = bulkCategories.find((c) => c.productCount >= 2)!;
+  assert(Boolean(bulkTarget), "для массовых действий есть категория с товарами");
+  // Кнопка «Массовые действия» без категории должна показывать выбор категории,
+  // а не «Категория не найдена» (регрессия после удаления дубликата case "bulk").
+  const bulkHub = adminScreens.bulkScreen(bulkCategories);
+  assert(bulkHub.text.includes("Массовые действия"), "голый callback bulk открывает выбор категории");
+  assert(
+    bulkHub.keyboard.inline_keyboard.flat().some((b) => "callback_data" in b && b.callback_data === `bulkcat:${bulkTarget.id}`),
+    "в списке массовых действий есть кнопка категории",
+  );
+  const beforeBulk = await flow.categoryVisibility(bulkTarget.id);
+  assert(beforeBulk.active === beforeBulk.total, "в тестовой категории все товары видны");
+
+  const hiddenBulk = await flow.bulkSetActive(bulkTarget.id, false);
+  assert(hiddenBulk.affected === beforeBulk.total, `скрыты все товары категории (${hiddenBulk.affected})`);
+  const hiddenCounts = await flow.categoryVisibility(bulkTarget.id);
+  assert(hiddenCounts.active === 0 && hiddenCounts.hidden === beforeBulk.total, "после скрытия витрина пуста");
+  const visibleAfterHide = await repo.listCatalog();
+  const stillThere = visibleAfterHide.some((c) => c.id === bulkTarget.id && c.products.length > 0);
+  assert(!stillThere, "скрытые товары не показываются на витрине");
+  const againHide = await flow.bulkSetActive(bulkTarget.id, false);
+  assert(againHide.affected === 0, "повторное скрытие честно сообщает «0 изменений»");
+
+  await flow.bulkSetActive(bulkTarget.id, true);
+  assert((await flow.categoryVisibility(bulkTarget.id)).active === beforeBulk.total, "товары возвращаются на витрину");
+
+  const beforePrices = (await repo.listProductsAdmin()).filter((p) => p.categoryName === bulkTarget.name);
+  const priceBefore = beforePrices[0].price;
+  const repriced = await flow.bulkReprice(bulkTarget.id, 10);
+  assert(repriced.affected === repriced.total, "цены изменились у всех товаров категории");
+  const afterPrices = (await repo.listProductsAdmin()).filter((p) => p.categoryName === bulkTarget.name);
+  assert(
+    afterPrices[0].price === Math.round((priceBefore * 110) / 100 / 100) * 100,
+    "цена выросла на 10% и округлена до рубля",
+  );
+  assert(afterPrices.every((p) => p.price % 100 === 0), "после массового изменения нет цен с копейками");
+  await flow.bulkReprice(bulkTarget.id, -10);
+  const restoredPrices = (await repo.listProductsAdmin()).filter((p) => p.categoryName === bulkTarget.name);
+  // Возврат на -10% не равен исходной цене: проценты считаются от округлённой
+  // цены, поэтому расхождение до 1% — математика, а не баг. Проверяем порядок
+  // величины, а не точное совпадение.
+  const drift = Math.abs(restoredPrices[0].price - priceBefore) / priceBefore;
+  assert(drift < 0.015, `обратный процент возвращает цену с расхождением до 1,5% (${(drift * 100).toFixed(2)}%)`);
+  assert(restoredPrices.every((p) => p.price % 100 === 0), "после снижения цены тоже целые рубли");
+
+  // Проценты: мусор не принимается, диапазон ограничен.
+  assert(adminScreens.parsePricePercent("+5") === 5, "процент с плюсом разбирается");
+  assert(adminScreens.parsePricePercent("-10%") === -10, "процент с минусом и знаком % разбирается");
+  assert(adminScreens.parsePricePercent("5,5") === 5.5, "дробный процент разбирается");
+  assert(adminScreens.parsePricePercent("0") === null, "ноль не меняет ничего — отклоняется");
+  assert(adminScreens.parsePricePercent("+80") === null, "слишком большой процент отклоняется");
+  assert(adminScreens.parsePricePercent("дороже") === null, "слова вместо процента отклоняются");
+
+  // Цена не может упасть до нуля даже при максимальной скидке.
+  const cheap = await repo.listProductsAdmin();
+  const cheapTarget = cheap.reduce((min, p) => (p.price < min.price ? p : min), cheap[0]);
+  await flow.bulkReprice(bulkTarget.id, -50);
+  const flooredPrices = await repo.listProductsAdmin();
+  assert(flooredPrices.every((p) => p.price >= 100), "минимальная цена — 1 ₽, бесплатных товаров нет");
+  void cheapTarget;
+
+  // ── Поиск заказа и очереди ───────────────────────────────────────────────
+  const searchOrder = (await repo.getOrderById(flowOrder.id))!;
+  const byTail = await repo.searchOrders(searchOrder.id.slice(-5));
+  assert(byTail.some((o) => o.id === searchOrder.id), "заказ находится по хвосту номера");
+  const byPhone = await repo.searchOrders("9990000000");
+  assert(Array.isArray(byPhone), "поиск по телефону не падает");
+  // Поиск идёт и по имени клиента, поэтому «абвгд» может найтись, если так
+  // назвали заказ в этом прогоне. Проверяем не пустоту, а отсутствие ложных
+  // совпадений: запрос, которого точно нет, ничего не возвращает.
+  assert((await repo.searchOrders("zzzzzz")).length === 0, "несуществующий запрос даёт пустой список");
+  assert((await repo.searchOrders("100%")).length === 0, "процент в запросе не работает как шаблон LIKE");
+  assert((await repo.searchOrders("_")).length === 0, "подчёркивание не совпадает с любым символом");
+  assert((await repo.searchOrders("я")).length === 0, "одна буква не запускает поиск по всей базе");
+
+  const emptySearch = adminScreens.orderSearchResultScreen("zzz", []);
+  assert(emptySearch.text.includes("Ничего не нашлось"), "пустой поиск объясняет результат");
+  const foundScreen = adminScreens.orderSearchResultScreen("ord-1", [searchOrder]);
+  assert(foundScreen.text.includes(searchOrder.id), "результат поиска показывает номер заказа");
+
+  const queues = await repo.orderQueueCounts();
+  assert(typeof queues.awaitingPayment === "number", "очередь оплаты считается");
+  await shop.setDeliveryStatus(searchOrder.id, "confirmed");
+  const paidQueue = await repo.listOrdersByDelivery("confirmed");
+  assert(paidQueue.some((o) => o.id === searchOrder.id), "подтверждённый заказ попадает в очередь оплаты");
+  await shop.setDeliveryStatus(searchOrder.id, "paid");
+  const shipQueue = await repo.listOrdersByDelivery("paid");
+  assert(shipQueue.some((o) => o.id === searchOrder.id), "оплаченный заказ попадает в очередь отправки");
+  const queueView = adminScreens.queueScreen(shipQueue, "paid");
+  assert(queueView.text.includes("Ждут отправки"), "экран очереди называет себя по-человечески");
+  const emptyQueue = adminScreens.queueScreen([], "confirmed");
+  assert(emptyQueue.text.includes("Пусто"), "пустая очередь говорит, что всё разобрано");
 
   rmSync(dir, { recursive: true, force: true });
   console.log("[check:bot] PASS — доступ, экраны, товары, варианты, характеристики, бонусы и заказы работают");
