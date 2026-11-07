@@ -27,7 +27,7 @@ export type Route =
 
 export default function ShopApp() {
   const [route, setRoute] = useState<Route>({ name: "catalog" });
-  const [cart, setCart] = useState<Cart>({ lines: [], total: 0, count: 0 });
+  const [cart, setCart] = useState<Cart>({ lines: [], total: 0, count: 0, savings: 0 });
   const [compare, setCompare] = useState<string[]>([]);
   const [toast, setToast] = useState<string>("");
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

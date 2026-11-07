@@ -12,11 +12,12 @@ export type CartLine = {
   variantId: string | null;
   variantLabel: string;
   basePrice: number;
+  oldPrice: number;
   unitPrice: number;
   quantity: number;
   lineTotal: number;
 };
-export type Cart = { lines: CartLine[]; total: number; count: number };
+export type Cart = { lines: CartLine[]; total: number; count: number; savings: number };
 
 /**
  * Корзина: количество меняется на месте, удаление — свайпом влево.
@@ -112,7 +113,12 @@ export default function CartScreen(props: {
                     disabled={busyKey === `${line.productId}:${line.variantId ?? ""}`}
                   />
                   <span className="flex-1" />
-                  <span className="price t-price">{money(line.lineTotal)}</span>
+                  <span className="flex flex-col items-end">
+                    {line.oldPrice > 0 && (
+                      <span className="price-old">{money(line.oldPrice * line.quantity)}</span>
+                    )}
+                    <span className="price t-price">{money(line.lineTotal)}</span>
+                  </span>
                 </div>
               </div>
             </div>
@@ -125,8 +131,14 @@ export default function CartScreen(props: {
       <div className="mt-4 border border-ink rounded-[14px] p-3">
         <div className="flex justify-between text-[13px]">
           <span className="text-ink-2">Товары</span>
-          <span>{money(props.cart.total)}</span>
+          <span>{money(props.cart.total + props.cart.savings)}</span>
         </div>
+        {props.cart.savings > 0 && (
+          <div className="flex justify-between text-[13px] mt-1 text-signal">
+            <span>Скидка</span>
+            <span className="tabular-nums">−{money(props.cart.savings)}</span>
+          </div>
+        )}
         <div className="flex justify-between text-[13px] mt-1">
           <span className="text-ink-2">Доставка</span>
           <span>обсудим в чате</span>

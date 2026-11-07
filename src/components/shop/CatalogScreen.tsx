@@ -51,6 +51,7 @@ export default function CatalogScreen(props: {
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [selectedSpecs, setSelectedSpecs] = useState<Record<string, string[]>>({});
   const [priceRange, setPriceRange] = useState<{ min?: number; max?: number }>({});
+  const [onlyDiscounted, setOnlyDiscounted] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -75,6 +76,7 @@ export default function CatalogScreen(props: {
     }
     if (priceRange.min) params.set("minPrice", String(priceRange.min / 100));
     if (priceRange.max) params.set("maxPrice", String(priceRange.max / 100));
+    if (onlyDiscounted) params.set("sale", "1");
 
     let cancelled = false;
     setLoading(true);
@@ -97,7 +99,7 @@ export default function CatalogScreen(props: {
     return () => {
       cancelled = true;
     };
-  }, [category, search, sort, selectedBrands, selectedSpecs, priceRange]);
+  }, [category, search, sort, selectedBrands, selectedSpecs, priceRange, onlyDiscounted]);
 
   // Новинки: свежие по дате поступления. В ленте — шесть, дальше это уже
   // не «что нового», а второй каталог.
@@ -110,8 +112,9 @@ export default function CatalogScreen(props: {
     () =>
       selectedBrands.length +
       Object.values(selectedSpecs).reduce((sum, values) => sum + values.length, 0) +
-      (priceRange.min || priceRange.max ? 1 : 0),
-    [selectedBrands, selectedSpecs, priceRange],
+      (priceRange.min || priceRange.max ? 1 : 0) +
+      (onlyDiscounted ? 1 : 0),
+    [selectedBrands, selectedSpecs, priceRange, onlyDiscounted],
   );
 
   function toggleBrand(value: string) {
@@ -134,6 +137,7 @@ export default function CatalogScreen(props: {
     setSelectedBrands([]);
     setSelectedSpecs({});
     setPriceRange({});
+    setOnlyDiscounted(false);
   }
 
   return (
@@ -286,6 +290,23 @@ export default function CatalogScreen(props: {
 
         {filtersOpen && (
           <div className="mt-3 border border-ink rounded-[14px] p-3">
+            {/* Скидка — первым чипом: это самый частый повод зайти в каталог */}
+            <fieldset className="mb-3">
+              <legend className="label">Выгода</legend>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  className={`chip !py-1 !px-2.5 text-[12px] ${onlyDiscounted ? "active" : ""}`}
+                  onClick={() => {
+                    haptic("select");
+                    setOnlyDiscounted((on) => !on);
+                  }}
+                  aria-pressed={onlyDiscounted}
+                >
+                  Со скидкой
+                </button>
+              </div>
+            </fieldset>
+
             {priceRange.min || priceRange.max || activeFilters > 0 ? (
               <button className="btn-ghost mb-3" onClick={resetFilters}>
                 Сбросить всё

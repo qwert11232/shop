@@ -81,6 +81,7 @@ function parseFilters(params: URLSearchParams): CatalogFilters {
     minPrice: num("minPrice"),
     maxPrice: num("maxPrice"),
     specs: Object.keys(specMap).length ? specMap : undefined,
+    onlyDiscounted: params.get("sale") === "1",
     sort: allowed.includes(sort as (typeof allowed)[number]) ? (sort as CatalogFilters["sort"]) : undefined,
   };
 }

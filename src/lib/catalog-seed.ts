@@ -141,6 +141,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Apple",
     priceRub: 129990,
     photo: "/products/ipad-pro-m4.webp",
+    gallery: ["/shop-photos/ipad-pro-m4-1.webp", "/shop-photos/ipad-pro-m4-2.webp", "/shop-photos/ipad-pro-m4-3.webp"],
     desc: "OLED-дисплей Tandem, чип M4, поддержка Apple Pencil Pro.",
     specs: [
       { group: "Экран", name: "Диагональ", value: "13", unit: "″", numeric: 13 },
@@ -162,6 +163,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Apple",
     priceRub: 24990,
     photo: "/products/airpods-pro-2.webp",
+    gallery: ["/shop-photos/airpods-pro-2-1.webp", "/shop-photos/airpods-pro-2-2.webp", "/shop-photos/airpods-pro-2-3.webp"],
     oldPriceRub: 26990,
     desc: "Активное шумоподавление, чип H2, до 30 часов с кейсом, защита IP54.",
     specs: [
@@ -178,6 +180,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Apple",
     priceRub: 54990,
     photo: "/products/airpods-max.webp",
+    gallery: ["/shop-photos/airpods-max-1.webp"],
     desc: "Накладные наушники: пространственный звук, шумоподавление, алюминиевые чашки.",
     specs: [
       { group: "Звук", name: "Пространственный звук", value: "есть" },
@@ -248,6 +251,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Sony",
     priceRub: 6990,
     photo: "/products/dualsense.webp",
+    gallery: ["/shop-photos/dualsense-1.webp", "/shop-photos/dualsense-2.webp", "/shop-photos/dualsense-3.webp"],
     oldPriceRub: 7990,
     desc: "Адаптивные курки, HD-вибрация, до 10 часов автономности.",
     specs: [

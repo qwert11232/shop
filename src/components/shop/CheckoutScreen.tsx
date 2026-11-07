@@ -217,11 +217,15 @@ export default function CheckoutScreen(props: {
                 {line.title}
                 {line.variantLabel ? ` · ${line.variantLabel}` : ""} × {line.quantity}
               </span>
-              <span className="tabular-nums shrink-0">{money(line.lineTotal)}</span>
+              <span className="flex items-baseline gap-1.5 shrink-0 tabular-nums">
+                {line.oldPrice > 0 && <span className="text-ink-3 line-through">{money(line.oldPrice * line.quantity)}</span>}
+                <span>{money(line.lineTotal)}</span>
+              </span>
             </li>
           ))}
         </ul>
         <div className="h-px bg-rule my-2.5" />
+        {props.cart.savings > 0 && <Row label="Скидка" value={`−${money(props.cart.savings)}`} />}
         {useBonus && bonusAmount > 0 && <Row label="Бонусами" value={`−${money(bonusAmount)}`} />}
         <div className="flex justify-between items-baseline">
           <span className="text-[14px] font-semibold">Итого</span>
