@@ -180,6 +180,7 @@ export const SEED_PRODUCTS: SeedProduct[] = [
     brand: "Apple",
     priceRub: 54990,
     photo: "/products/airpods-max.webp",
+    gallery: ["/shop-photos/airpods-max-1.webp"],
     desc: "Накладные наушники: пространственный звук, шумоподавление, алюминиевые чашки.",
     specs: [
       { group: "Звук", name: "Пространственный звук", value: "есть" },
