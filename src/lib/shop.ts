@@ -332,8 +332,8 @@ export async function addToCart(input: {
   }
 
   await db.run(
-    "INSERT INTO cart_items (tg_user_id, product_id, variant_id, quantity, updated_at) VALUES (?, ?, ?, ?, ?)",
-    [input.tgUserId, input.productId, variantId, quantity, Date.now()],
+    "INSERT INTO cart_items (id, tg_user_id, product_id, variant_id, quantity, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    [`ci-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, input.tgUserId, input.productId, variantId, quantity, Date.now()],
   );
   return getCart(input.tgUserId);
 }

@@ -75,6 +75,8 @@ async function main() {
   await checkPhotoMigration();
   await checkSettingsAndSearch();
   await checkDiscounts();
+  await checkOrderFlow();
+  await checkCartMigration();
 
   console.log("[check:pg] PASS — SQL-слой совместим с PostgreSQL");
 }
@@ -362,4 +364,202 @@ async function checkSettingsAndSearch(): Promise<void> {
   const queues = await orderQueueCounts();
   assert(queues.awaitingPayment === 1, "очередь оплаты считается на PostgreSQL");
   __setDbForCheck(null);
+}
+
+/**
+ * Вся механика заказа на PostgreSQL: корзина с вариантом и без, оформление,
+ * позиции, бонусы, очистка корзины.
+ *
+ * Появилась после боевой ошибки: `PRIMARY KEY (tg_user_id, product_id, variant_id)`
+ * в PostgreSQL делает variant_id NOT NULL (так работает стандарт), и товар без
+ * варианта не добавлялся в корзину вовсе. На SQLite это не проявлялось —
+ * там NULL в первичном ключе разрешён, поэтому проверка на SQLite молчала.
+ */
+async function checkOrderFlow(): Promise<void> {
+  const { __setDbForCheck } = await import("../src/lib/db");
+  const shop = await import("../src/lib/shop");
+  const { POSTGRES_SCHEMA_SQL, POSTGRES_MIGRATIONS_SQL } = await import("../src/lib/db-postgres-schema");
+
+  const pg = new PGlite();
+  await pg.exec(POSTGRES_SCHEMA_SQL);
+  await pg.exec(POSTGRES_MIGRATIONS_SQL);
+  const db = createPostgresDb("postgres://local/orders", {
+    query: async (text: string, values?: unknown[]) => {
+      const res = await pg.query(text, values);
+      return { rows: res.rows };
+    },
+  });
+  __setDbForCheck(db);
+
+  await db.run("INSERT INTO categories (id, name, icon) VALUES (?, ?, ?)", ["c1", "Смартфоны", ""]);
+  // Товар без вариантов и товар с двумя вариантами — оба пути корзины.
+  await db.run(
+    "INSERT INTO products (id, title, description, price, old_price, photo_url, category_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ["p-plain", "Товар без вариантов", "", 100000, 0, "/p1.webp", "c1"],
+  );
+  await db.run(
+    "INSERT INTO products (id, title, description, price, old_price, photo_url, category_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ["p-var", "Телефон с памятью", "", 9000000, 0, "/p2.webp", "c1"],
+  );
+  await db.run(
+    "INSERT INTO product_variants (id, product_id, kind, label, extra, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+    ["v-128", "p-var", "variant", "128 ГБ", -800000, 0],
+  );
+  await db.run(
+    "INSERT INTO product_variants (id, product_id, kind, label, extra, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+    ["v-512", "p-var", "variant", "512 ГБ", 1500000, 1],
+  );
+
+  // Главное: товар без варианта кладётся в корзину (в PG NULL в PK запрещён).
+  const buyer = "900001";
+  let cart = await shop.addToCart({ tgUserId: buyer, productId: "p-plain", quantity: 2 });
+  assert(cart.lines.length === 1, "товар без вариантов добавляется в корзину на PostgreSQL");
+  assert(cart.lines[0].variantId === null, "у строки без варианта variantId = null, а не заглушка");
+  assert(cart.lines[0].lineTotal === 200000, "количество умножает цену");
+
+  // Повторное добавление увеличивает количество, а не плодит строки.
+  cart = await shop.addToCart({ tgUserId: buyer, productId: "p-plain", quantity: 1 });
+  assert(cart.lines.length === 1 && cart.lines[0].quantity === 3, "повторное добавление увеличивает количество");
+
+  // Товар с вариантом: надбавка входит в цену строки.
+  cart = await shop.addToCart({ tgUserId: buyer, productId: "p-var", variantId: "v-128", quantity: 1 });
+  const varLine = cart.lines.find((l) => l.variantId === "v-128");
+  assert(varLine !== undefined, "товар с вариантом попадает в корзину отдельной строкой");
+  assert(varLine!.unitPrice === 8200000, "цена строки = цена товара + надбавка варианта");
+  assert(varLine!.variantLabel === "128 ГБ", "подпись варианта доходит до корзины");
+
+  // Тот же товар в другом варианте — вторая строка, а не перезапись.
+  cart = await shop.addToCart({ tgUserId: buyer, productId: "p-var", variantId: "v-512", quantity: 1 });
+  assert(cart.lines.length === 3, "разные варианты одного товара — разные строки корзины");
+
+  // Изменение количества и удаление строки без варианта.
+  cart = await shop.setCartQuantity({ tgUserId: buyer, productId: "p-plain", variantId: null, quantity: 5 });
+  assert(cart.lines.find((l) => l.productId === "p-plain")!.quantity === 5, "количество строки без варианта меняется");
+  cart = await shop.setCartQuantity({ tgUserId: buyer, productId: "p-var", variantId: "v-512", quantity: 0 });
+  assert(!cart.lines.some((l) => l.variantId === "v-512"), "нулевое количество удаляет строку");
+
+  // Чужой вариант не должен попасть в свою корзину.
+  let rejected = false;
+  await shop.addToCart({ tgUserId: buyer, productId: "p-plain", variantId: "v-128", quantity: 1 }).catch(() => {
+    rejected = true;
+  });
+  assert(rejected, "вариант от другого товара отклоняется");
+
+  // Оформление: сумма, позиции, бонусы.
+  const before = cart.total;
+  const order = await shop.createPurchaseOrder({
+    tgUserId: buyer,
+    contactName: "Иван",
+    contactPhone: "+7 900 000-00-00",
+    total: before,
+    items: cart.lines.map((l) => ({ productId: l.productId, variantId: l.variantId, quantity: l.quantity })),
+  });
+  assert(order.total === before, "сумма заказа равна сумме корзины");
+
+  const items = await shop.listOrderItems(order.id);
+  assert(items.length === 2, "в заказ попали обе позиции");
+  assert(
+    items.some((i) => i.variant === "128 ГБ") && items.some((i) => i.variant === ""),
+    "вариант сохранён в позиции, у товара без варианта — пустая строка",
+  );
+  assert(
+    items.every((i) => i.price > 0 && i.quantity > 0),
+    "у каждой позиции есть цена и количество",
+  );
+
+  const mine = await shop.listMyOrders(buyer);
+  assert(mine.some((o) => o.id === order.id), "заказ виден в «Моих заказах»");
+
+  const customer = await shop.getCustomer(buyer);
+  assert((customer?.bonusBalance ?? 0) > 0, "кешбэк начислен покупателю");
+
+  // Статусы: заказ двигается по цепочке и это видно в списке.
+  await shop.setDeliveryStatus(order.id, "shipped");
+  const shipped = (await shop.listMyOrders(buyer)).find((o) => o.id === order.id)!;
+  assert(shipped !== undefined, "смена статуса доставки не теряет заказ");
+
+  await shop.clearCart(buyer);
+  const empty = await shop.getCart(buyer);
+  assert(empty.lines.length === 0 && empty.savings === 0, "после оформления корзина пуста");
+
+  __setDbForCheck(null);
+}
+
+/**
+ * Миграция корзины: база, созданная старым DDL (variant_id в первичном ключе),
+ * должна открыться и принять товар без варианта после прогона миграций.
+ * Без этого фикс работал бы только на новых установках.
+ */
+async function checkCartMigration(): Promise<void> {
+  const { POSTGRES_SCHEMA_SQL, POSTGRES_MIGRATIONS_SQL } = await import("../src/lib/db-postgres-schema");
+
+  const pg = new PGlite();
+  // Старая схема — как она выглядела до исправления.
+  await pg.exec(`
+    CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0, is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+    CREATE TABLE products (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+      price INTEGER NOT NULL, photo_url TEXT NOT NULL, is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      category_id TEXT NOT NULL REFERENCES categories(id));
+    CREATE TABLE cart_items (
+      tg_user_id TEXT NOT NULL,
+      product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      variant_id TEXT,
+      quantity   INTEGER NOT NULL DEFAULT 1,
+      updated_at BIGINT NOT NULL,
+      PRIMARY KEY (tg_user_id, product_id, variant_id)
+    );
+    INSERT INTO categories (id, name) VALUES ('c1', 'Тест');
+    INSERT INTO products (id, title, price, photo_url, category_id) VALUES ('p1', 'Товар', 1000, '/p.webp', 'c1');
+    INSERT INTO cart_items (tg_user_id, product_id, variant_id, quantity, updated_at)
+      VALUES ('u1', 'p1', 'v1', 2, 1);
+  `);
+
+  // До миграции старый ключ действительно не пускает NULL.
+  let failedBefore = false;
+  await pg.query(
+    "INSERT INTO cart_items (tg_user_id, product_id, variant_id, quantity, updated_at) VALUES ($1, $2, $3, $4, $5)",
+    ["u1", "p1", null, 1, 2],
+  ).catch(() => {
+    failedBefore = true;
+  });
+  assert(failedBefore, "старая схема воспроизводит ошибку: NULL в variant_id запрещён первичным ключом");
+
+  await pg.exec(POSTGRES_SCHEMA_SQL);
+  await pg.exec(POSTGRES_MIGRATIONS_SQL);
+
+  const db = createPostgresDb("postgres://local/migration", {
+    query: async (text: string, values?: unknown[]) => {
+      const res = await pg.query(text, values);
+      return { rows: res.rows };
+    },
+    exec: async (sql: string) => {
+      await pg.exec(sql);
+    },
+  });
+
+  // Старая строка сохранилась и получила id.
+  // Настоящая миграция приложения: та же функция, что зовёт деплой при старте.
+  const { ensurePostgresSchema } = await import("../src/lib/db-postgres-schema");
+  await ensurePostgresSchema(db);
+
+  const kept = await db.all<{ id: string; quantity: number | string; variant_id: string | null }>(
+    "SELECT id, quantity, variant_id FROM cart_items",
+  );
+  assert(kept.length === 1 && kept[0].id !== null, "существующая строка корзины пережила миграцию и получила id");
+  assert(Number(kept[0].quantity) === 2, "количество в старой строке не потерялось");
+
+  await db.run(
+    "INSERT INTO cart_items (id, tg_user_id, product_id, variant_id, quantity, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ["ci-2", "u1", "p1", null, 1, 3],
+  );
+  assert(true, "после миграции товар без варианта вставляется");
+
+  // Повторный прогон миграций безопасен, иначе деплой падал бы на каждом старте.
+  await pg.exec(POSTGRES_SCHEMA_SQL);
+  await pg.exec(POSTGRES_MIGRATIONS_SQL);
+  const after = await db.all<{ id: string }>("SELECT id FROM cart_items");
+  assert(after.length === 2, "повторная миграция ничего не дублирует и не теряет");
 }

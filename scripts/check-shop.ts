@@ -423,6 +423,26 @@ async function main() {
       "«Сбросить всё» снимает фильтр скидок",
     );
 
+    // Корзина: строка адресуется по id, а не по составному ключу с variant_id.
+    // В PostgreSQL variant_id в первичном ключе неявно NOT NULL — товар без
+    // варианта не добавлялся вовсе. Проверяем оба пути и на SQLite.
+    const plainProduct = products.find((p) => !p.oldPrice || p.oldPrice <= p.price)!;
+    const plainCart = await shop.addToCart({ tgUserId: "777002", productId: plainProduct.id, quantity: 1 });
+    assert(
+      plainCart.lines.length === 1 && plainCart.lines[0].variantId === null,
+      "товар без вариантов кладётся в корзину (раньше падало на PostgreSQL)",
+    );
+    const cartId = await (async () => {
+      const { getDb } = await import("../src/lib/db");
+      const db = await getDb();
+      const row = await db.get<{ id: string }>("SELECT id FROM cart_items WHERE tg_user_id = ?", ["777002"]);
+      return row?.id ?? "";
+    })();
+    assert(cartId.startsWith("ci-"), "у строки корзины есть собственный id");
+    const sameAgain = await shop.addToCart({ tgUserId: "777002", productId: plainProduct.id, quantity: 1 });
+    assert(sameAgain.lines.length === 1 && sameAgain.lines[0].quantity === 2, "повтор не создаёт вторую строку");
+    await shop.clearCart("777002");
+
     // Корзина и заказ берут price, а не oldPrice.
     const buyer = "777001";
     const cart = await shop.addToCart({ tgUserId: buyer, productId: sale!.id, quantity: 1 });

@@ -94,12 +94,12 @@ CREATE TABLE IF NOT EXISTS favorites (
 );
 
 CREATE TABLE IF NOT EXISTS cart_items (
+  id         TEXT PRIMARY KEY,
   tg_user_id TEXT NOT NULL,
   product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   variant_id TEXT,
   quantity   INTEGER NOT NULL DEFAULT 1,
-  updated_at BIGINT NOT NULL,
-  PRIMARY KEY (tg_user_id, product_id, variant_id)
+  updated_at BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS customers (
@@ -159,6 +159,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(tg_user_id);
 CREATE INDEX IF NOT EXISTS idx_order_limits_client ON order_limits(client_key, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cart_unique ON cart_items(tg_user_id, product_id, COALESCE(variant_id, ''));
 CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants(product_id);
 CREATE INDEX IF NOT EXISTS idx_media_product ON product_media(product_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id);
@@ -184,3 +185,21 @@ COMMIT;
 --  SELECT count(*) FROM information_schema.tables WHERE table_schema='public'; -- ожидается: 14
 --  SELECT count(*) FROM products;   -- после сидирования: 17
 -- ============================================================================
+
+-- ============================================================================
+--  Корзина: variant_id больше не входит в первичный ключ
+--
+--  В PostgreSQL колонка первичного ключа неявно NOT NULL, поэтому товар без
+--  варианта не добавлялся вовсе: «null value in column "variant_id"».
+--  Строка теперь адресуется по id, а уникальность пары «товар + вариант»
+--  держит idx_cart_unique (COALESCE превращает NULL в пустую строку).
+--
+--  Здесь только добавляется колонка и заполняются старые строки. Переключение
+--  первичного ключа делает migrateCartTable() в src/lib/db-postgres-schema.ts —
+--  приложение вызывает его при первом подключении, поэтому ручной запуск этого
+--  файла ничего не оставит в старом виде.
+-- ============================================================================
+ALTER TABLE cart_items ADD COLUMN IF NOT EXISTS id TEXT;
+-- Первичный ключ делал variant_id неявно NOT NULL; снимаем это ограничение.
+ALTER TABLE cart_items ALTER COLUMN variant_id DROP NOT NULL;
+UPDATE cart_items SET id = 'ci-' || md5(random()::text) WHERE id IS NULL;
