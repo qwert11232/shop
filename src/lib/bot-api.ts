@@ -50,6 +50,15 @@ export function botToken(): string | null {
   return token || null;
 }
 
+/**
+ * Адрес Bot API. Переопределяется `BOT_API_BASE` — это нужно проверкам:
+ * они поднимают локальную заглушку и видят точные тексты, которые уходят
+ * в Telegram, не имея настоящего токена.
+ */
+function apiBase(): string {
+  return (process.env.BOT_API_BASE?.trim() || "https://api.telegram.org").replace(/\/$/, "");
+}
+
 export async function callBot<T>(
   method: string,
   payload: Record<string, unknown>,
@@ -60,7 +69,7 @@ export async function callBot<T>(
     return null;
   }
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    const res = await fetch(`${apiBase()}/bot${token}/${method}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
@@ -142,8 +151,15 @@ export function getMe() {
   return callBot<{ id: number; username?: string; first_name: string }>("getMe", {});
 }
 
-export function setMyCommands(commands: { command: string; description: string }[]) {
-  return callBot<boolean>("setMyCommands", { commands });
+/**
+ * Команды меню. `scope` позволяет показать разный список админу и покупателю:
+ * Telegram сам решает, какой набор рисовать, по chat_id из scope.
+ */
+export function setMyCommands(
+  commands: { command: string; description: string }[],
+  scope?: { type: "default" } | { type: "chat"; chat_id: number },
+) {
+  return callBot<boolean>("setMyCommands", scope ? { commands, scope } : { commands });
 }
 
 /** file_id → готовый URL картинки (для фото из чата: обложка товара). */
@@ -151,5 +167,5 @@ export async function getFileUrl(fileId: string): Promise<string | null> {
   const file = await callBot<{ file_path?: string }>("getFile", { file_id: fileId });
   const token = botToken();
   if (!file?.file_path || !token) return null;
-  return `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+  return `${apiBase()}/file/bot${token}/${file.file_path}`;
 }
