@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getMe, getWebhookInfo, setMyCommands, setWebhook, takeLastError } from "@/lib/bot-api";
+import {
+  getMe,
+  getWebhookInfo,
+  setChatMenuButton,
+  setMyCommands,
+  setWebhook,
+  takeLastError,
+} from "@/lib/bot-api";
 import { adminsConfigured, adminIds, adminUsernames, appUrl } from "@/lib/bot-access";
 
 export const dynamic = "force-dynamic";
@@ -105,6 +112,10 @@ async function handler(req: NextRequest) {
     ok: adminResults.every(Boolean),
     detail: { chats: adminChats.length, applied: adminResults.filter(Boolean).length },
   });
+
+  // Кнопка меню в личке — тоже мини-апп, иначе у покупателя нет точки входа.
+  const menuButton = await setChatMenuButton(base);
+  steps.push({ step: "setChatMenuButton", ok: Boolean(menuButton), detail: menuButton ? base : takeLastError() });
 
   const info = await getWebhookInfo();
   steps.push({ step: "getWebhookInfo", ok: Boolean(info), detail: info ?? takeLastError() });

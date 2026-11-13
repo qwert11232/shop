@@ -4,7 +4,18 @@
  * в тексте ошибки — метод и код ответа, без URL с токеном.
  */
 
-export type InlineButton = { text: string; callback_data: string } | { text: string; url: string };
+/**
+ * Кнопка Mini App — `web_app`, а не `url`.
+ *
+ * Разница принципиальная: обычная ссылка открывает сайт в браузере, где нет
+ * `Telegram.WebApp.initData` — приложение не узнаёт, кто пришёл, и показывает
+ * гостя. `web_app` открывает мини-апп внутри Telegram и передаёт данные
+ * пользователя, подписанные ботом.
+ */
+export type InlineButton =
+  | { text: string; callback_data: string }
+  | { text: string; url: string }
+  | { text: string; web_app: { url: string } };
 export type Keyboard = { inline_keyboard: InlineButton[][] };
 
 export type BotUser = {
@@ -160,6 +171,18 @@ export function setMyCommands(
   scope?: { type: "default" } | { type: "chat"; chat_id: number },
 ) {
   return callBot<boolean>("setMyCommands", scope ? { commands, scope } : { commands });
+}
+
+/**
+ * Кнопка «меню» слева от поля ввода в личке с ботом.
+ *
+ * `web_app` открывает магазин как мини-апп: с данными покупателя. Если оставить
+ * обычный `default`, Telegram никогда не покажет точку входа в приложение.
+ */
+export function setChatMenuButton(url: string) {
+  return callBot<boolean>("setChatMenuButton", {
+    menu_button: { type: "web_app", text: "Витрина", web_app: { url } },
+  });
 }
 
 /** file_id → готовый URL картинки (для фото из чата: обложка товара). */

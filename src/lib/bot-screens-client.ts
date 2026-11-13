@@ -1,4 +1,4 @@
-import { appUrl } from "./bot-access";
+import { appButton } from "./bot-screens";
 import { esc, money, type Screen } from "./bot-screens";
 import { DELIVERY_STEPS, deliveryLabel, deliveryStepIndex } from "./order-status";
 import type { Cart, OrderSummary } from "./shop";
@@ -15,11 +15,9 @@ import type { Cart, OrderSummary } from "./shop";
  * и суммы в копейках. Он видит «Ожидает подтверждения», трек-номер и бонусы.
  */
 
-const APP_BUTTON = { text: "Открыть витрину", url: appUrl() };
-
 /** Подвал клиентских экранов: витрина — главный путь к покупке. */
 function shopKeyboard(extra: { text: string; callback_data: string }[][] = []) {
-  return { inline_keyboard: [...extra, [APP_BUTTON]] };
+  return { inline_keyboard: [...extra, [appButton()]] };
 }
 
 /** Шаги заказа одной строкой: «Оплачен → Отправлен → Получен». */

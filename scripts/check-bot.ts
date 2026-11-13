@@ -73,7 +73,16 @@ async function main() {
   assert(flat(menu.text).includes("179 980 ₽"), "меню показывает выручку в рублях");
   const flatButtons = menu.keyboard!.inline_keyboard.flat();
   assert(flatButtons.some((b) => "callback_data" in b && b.callback_data === "orders:new"), "в меню есть кнопка заявок");
-  assert(flatButtons.some((b) => "url" in b && b.url.startsWith("http")), "в меню есть кнопка витрины");
+  // Витрина — мини-апп: у кнопки `web_app`, а не `url`. Ссылка открыла бы
+  // браузер без Telegram-данных, и покупатель стал бы гостем.
+  assert(
+    flatButtons.some((b) => "web_app" in b && b.web_app.url.startsWith("http")),
+    "в меню есть кнопка витрины, открывающая мини-апп",
+  );
+  assert(
+    !flatButtons.some((b) => "url" in b && b.url.startsWith("http") && b.text.includes("витрин")),
+    "кнопка витрины больше не ведёт обычной ссылкой",
+  );
   assert(
     flatButtons.some((b) => "callback_data" in b && b.callback_data === "queue:confirmed"),
     "в меню есть переход к очереди оплаты",
@@ -721,6 +730,45 @@ async function main() {
   assert(!access.isBotAdmin({ id: 555 }), "и никто не админ");
   const stillClient = clientScreens.clientMenuScreen({ name: "Аня", orders: 0, cartCount: 0, bonus: 0 });
   assert(stillClient.text.includes("Аня"), "клиентское меню собирается и без настроенного владельца");
+
+  // ── Витрина открывается как мини-апп, а не ссылкой ───────────────────────
+  // Ссылка (`url`) открывает браузер: там нет Telegram.WebApp.initData, сайт
+  // не знает покупателя и показывает гостя. Для магазина это ломает корзину
+  // и заказы, поэтому все входы в витрину обязаны быть `web_app`.
+  type Btn = { text: string; url?: string; web_app?: { url: string }; callback_data?: string };
+  const buttonsOf = (screen: { keyboard?: { inline_keyboard: unknown } }): Btn[] =>
+    ((screen.keyboard?.inline_keyboard ?? []) as Btn[][]).flat();
+
+  const clientMenuBtns = buttonsOf(clientScreens.clientMenuScreen({ name: "Аня", orders: 0, cartCount: 0, bonus: 0 }));
+  const appBtn = clientMenuBtns.find((b) => b.text.includes("витрин"))!;
+  assert(appBtn !== undefined, "в клиентском меню есть кнопка витрины");
+  assert(Boolean(appBtn.web_app?.url), "кнопка витрины открывает мини-апп (web_app), а не ссылку");
+  assert(appBtn.url === undefined, "у кнопки витрины нет url — иначе откроется браузер без данных Telegram");
+
+  const adminMenu = screens.menuScreen({
+    newOrders: 0, awaitingPayment: 0, awaitingShipment: 0,
+    activeProducts: 1, revenueDone: 0, paymentConfigured: true,
+  });
+  const adminAppBtn = buttonsOf(adminMenu).find((b) => b.text.includes("витрин"))!;
+  assert(Boolean(adminAppBtn.web_app?.url) && adminAppBtn.url === undefined,
+    "у владельца витрина тоже открывается мини-аппом");
+
+  const productButtons = buttonsOf(
+    admin.productAdminScreen({
+      id: "p1", title: "Товар", description: "описание", price: 100000, photoUrl: "/p.webp",
+      brand: "Бренд", isActive: true, gallery: [], variants: [], specs: [], categoryName: "Тест",
+      createdAt: "2026-01-01T00:00:00Z",
+    } as never) as never,
+  );
+  const openInShop = productButtons.find((b) => b.text.includes("витрине"))!;
+  assert(Boolean(openInShop.web_app?.url?.includes("product=p1")),
+    "кнопка «Открыть в витрине» ведёт на товар внутри мини-аппа");
+
+  // Приложение читает ?product= из адреса, иначе кнопка ведёт на каталог.
+  assert(
+    readFileSync(path.join(process.cwd(), "src/components/shop/ShopApp.tsx"), "utf8").includes('params.get("product")'),
+    "витрина открывает товар по ?product= из кнопки бота",
+  );
 
   rmSync(dir, { recursive: true, force: true });
   console.log("[check:bot] PASS — доступ, экраны, товары, варианты, характеристики, бонусы и заказы работают");

@@ -22,8 +22,16 @@ export function money(kopecks: number): string {
   return `${(kopecks / 100).toLocaleString("ru-RU").replace(/\u00a0|\u202f/g, " ")} ₽`;
 }
 
+/**
+ * Кнопка витрины. Именно `web_app`: мини-апп внутри Telegram знает, кто
+ * покупатель, а обычная ссылка открывает сайт без данных — там гость.
+ */
+export function appButton(text = "Открыть витрину"): InlineButton {
+  return { text, web_app: { url: appUrl() } };
+}
+
 function openApp(): Keyboard {
-  return { inline_keyboard: [[{ text: "Открыть витрину", url: appUrl() }]] };
+  return { inline_keyboard: [[appButton()]] };
 }
 
 /** Часы работы магазина в человеческом виде: «05.11, 14:32» по Москве. */
@@ -92,7 +100,7 @@ export function menuScreen(stats: {
       { text: "Сводка", callback_data: "stats" },
     ],
     [{ text: stats.paymentConfigured ? "Оплата и реквизиты" : "Настроить оплату", callback_data: "pay" }],
-    [{ text: "Открыть витрину", url: appUrl() }],
+    [appButton()],
   ];
 
   return { text, keyboard: { inline_keyboard: keyboard } };
