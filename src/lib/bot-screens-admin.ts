@@ -124,7 +124,7 @@ export function productAdminScreen(product: Product & { categoryName?: string | 
           { text: "Удалить", callback_data: `del:${product.id}` },
         ],
         [
-          { text: "Открыть в витрине", url: `${appUrl()}/?product=${product.id}` },
+          { text: "Открыть в витрине", web_app: { url: `${appUrl()}/?product=${product.id}` } },
           { text: "‹ Товары", callback_data: "products:0" },
         ],
       ],

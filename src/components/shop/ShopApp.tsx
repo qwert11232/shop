@@ -47,6 +47,22 @@ export default function ShopApp() {
     initTelegram();
   }, []);
 
+  /**
+   * Точка входа из бота: кнопка «Открыть в витрине» ведёт на `?product=<id>`.
+   * Без этого покупатель попадал на каталог и искал товар руками.
+   * Адрес чистим через replaceState: обновление страницы не должно возвращать
+   * на тот же товар, если человек уже ушёл в другой раздел.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const product = params.get("product");
+    if (!product) return;
+    setRoute({ name: "product", id: product });
+    params.delete("product");
+    const search = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${search ? `?${search}` : ""}`);
+  }, []);
+
   const loadCart = useCallback(async () => {
     try {
       const res = await fetch("/api/cart", { headers: { "x-telegram-init-data": initDataSafe() } });
