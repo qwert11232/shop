@@ -13,7 +13,6 @@ import {
   errorScreen,
   helpScreen,
   menuScreen,
-  noAccessScreen,
   notConfiguredScreen,
   ordersScreen,
   orderStatusLabel,
@@ -52,6 +51,14 @@ import {
 } from "@/lib/bot-screens-admin";
 import { buildOrderMessage, notifyCustomer, userLabel } from "@/lib/telegram";
 import {
+  clientBonusScreen,
+  clientCartScreen,
+  clientHelpScreen,
+  clientMenuScreen,
+  clientOrderCardScreen,
+  clientOrdersScreen,
+} from "@/lib/bot-screens-client";
+import {
   SETTING_DEFS,
   getSettings,
   isSettingKey,
@@ -83,7 +90,10 @@ import {
 } from "@/lib/repo";
 import {
   deliveryLabel,
+  getCart,
+  getOrCreateCustomer,
   isDeliveryStatus,
+  listBonusEvents,
   listCustomers,
   listOrderItems,
   setDeliveryStatus,
@@ -120,6 +130,9 @@ import { countProductMedia } from "@/lib/repo";
 import { storageDriver } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
+
+/** Команды, которые существуют только для владельца: на них и подсказываем настройку. */
+const ADMIN_ONLY_COMMANDS = new Set(["/new", "/products", "/customers", "/stats", "/find"]);
 
 /**
  * Webhook админ-бота ТЕХНОЛАД.
@@ -196,12 +209,6 @@ async function handleMessage(message: BotMessage): Promise<void> {
   const command = text.split(/\s+/)[0]?.replace(/@.*$/, "").toLowerCase() ?? "";
   const chat = String(chatId);
 
-  if (!adminsConfigured()) {
-    const screen = notConfiguredScreen(from.id);
-    await sendMessage(chatId, screen.text, screen.keyboard);
-    return;
-  }
-
   if (command === "/id") {
     await sendMessage(
       chatId,
@@ -210,9 +217,19 @@ async function handleMessage(message: BotMessage): Promise<void> {
     return;
   }
 
+  // Покупатель. Раньше здесь был тупик «нет доступа»: человек открывал бота
+  // и не мог ничего — ни заказов, ни корзины. Теперь у него свой набор.
+  //
+  // Если админы ещё не настроены, магазином никто не управляет — но это не
+  // повод закрывать бота покупателям. Подсказку про ADMIN_TELEGRAM_IDS видит
+  // только тот, кто пришёл с админской командой.
   if (!isBotAdmin(from)) {
-    const screen = noAccessScreen();
-    await sendMessage(chatId, screen.text, screen.keyboard);
+    if (!adminsConfigured() && ADMIN_ONLY_COMMANDS.has(command)) {
+      const screen = notConfiguredScreen(from.id);
+      await sendMessage(chatId, screen.text, screen.keyboard);
+      return;
+    }
+    await handleClientMessage(from, chatId, command, text);
     return;
   }
 
@@ -259,6 +276,123 @@ async function handleMessage(message: BotMessage): Promise<void> {
     default:
       await render(chatId, await mainMenu());
   }
+}
+
+// ─── Покупатель ────────────────────────────────────────────────────────────
+
+/**
+ * Всё, что доступно обычному пользователю. Ни одна функция отсюда не трогает
+ * товары, заказы других людей и настройки: только свой профиль, своя корзина
+ * и свои заказы — по `tgUserId`, который Telegram подписал в апдейте.
+ */
+async function handleClientMessage(
+  from: BotUser,
+  chatId: number,
+  command: string,
+  text: string,
+): Promise<void> {
+  const me = String(from.id);
+
+  switch (command) {
+    case "/start":
+    case "/menu": {
+      await render(chatId, await clientMenu(me, from.first_name));
+      return;
+    }
+    case "/orders":
+      await render(chatId, clientOrdersScreen(await listMyOrders(me)));
+      return;
+    case "/cart": {
+      const cart = await getCart(me);
+      await render(chatId, clientCartScreen(cart));
+      return;
+    }
+    case "/bonus":
+    case "/bonuses": {
+      const customer = await getOrCreateCustomer({ tgUserId: me, firstName: from.first_name, username: from.username ?? "" });
+      const events = await listBonusEvents(me, 8);
+      await render(chatId, clientBonusScreen({ bonus: customer.bonusBalance, events }));
+      return;
+    }
+    case "/help":
+      await render(chatId, await clientHelp());
+      return;
+    default:
+      break;
+  }
+
+  // Свободный текст: похоже на номер заказа — ищем среди СВОИХ заказов.
+  // Это главный запрос покупателя «где мой заказ», и он должен работать
+  // без команд и без знания номера целиком.
+  const needle = text.replace(/[^\w-]/g, "");
+  if (needle.length >= 4) {
+    const mine = await listMyOrders(me);
+    const found = mine.find((order) => order.id.toLowerCase().endsWith(needle.toLowerCase()));
+    if (found) {
+      await render(chatId, clientOrderCardScreen(found));
+      return;
+    }
+  }
+
+  await render(chatId, await clientMenu(me, from.first_name));
+}
+
+async function handleClientCallback(
+  query: NonNullable<BotUpdate["callback_query"]>,
+  tgUserId: string,
+): Promise<void> {
+  const chatId = query.message?.chat.id;
+  const messageId = query.message?.message_id;
+  const [, arg = ""] = splitOnce(query.data ?? "", ":");
+  const firstName = query.from.first_name;
+  if (!chatId) {
+    await answerCallback(query.id);
+    return;
+  }
+  await answerCallback(query.id);
+
+  const show = async (screen: Screen) => {
+    if (messageId) await render(chatId, screen, messageId);
+    else await sendMessage(chatId, screen.text, screen.keyboard);
+  };
+
+  switch (arg) {
+    case "orders":
+      await show(clientOrdersScreen(await listMyOrders(tgUserId)));
+      return;
+    case "cart":
+      await show(clientCartScreen(await getCart(tgUserId)));
+      return;
+    case "bonus": {
+      const customer = await getOrCreateCustomer({ tgUserId, firstName, username: query.from.username ?? "" });
+      await show(clientBonusScreen({ bonus: customer.bonusBalance, events: await listBonusEvents(tgUserId, 8) }));
+      return;
+    }
+    case "help":
+      await show(await clientHelp());
+      return;
+    default:
+      await show(await clientMenu(tgUserId, firstName));
+  }
+}
+
+async function clientMenu(tgUserId: string, firstName: string): Promise<Screen> {
+  const [orders, cart, customer] = await Promise.all([
+    listMyOrders(tgUserId),
+    getCart(tgUserId),
+    getOrCreateCustomer({ tgUserId, firstName, username: "" }),
+  ]);
+  return clientMenuScreen({
+    name: firstName,
+    orders: orders.length,
+    cartCount: cart.count,
+    bonus: customer.bonusBalance,
+  });
+}
+
+async function clientHelp(): Promise<Screen> {
+  const settings = await getSettings();
+  return clientHelpScreen({ phone: settings.shop_phone });
 }
 
 /**
@@ -729,8 +863,14 @@ async function handleCallback(update: BotUpdate): Promise<void> {
   const data = query.data ?? "";
   const chat = String(chatId);
 
+  // Кнопки покупателя обрабатываются до проверки на админа, но только свои:
+  // `my:*` не трогает ни товары, ни чужие заказы. Всё остальное — админское.
   if (!isBotAdmin(query.from)) {
-    await answerCallback(query.id, "Раздел доступен владельцу магазина");
+    if (data.startsWith("my:")) {
+      await handleClientCallback(query, String(query.from.id));
+    } else {
+      await answerCallback(query.id, "Раздел доступен владельцу магазина");
+    }
     return;
   }
   if (!chatId || !messageId) {

@@ -3,6 +3,8 @@ import { orderKeyboard } from "./order-message";
 
 // avoid-ai-design-ignore-file: I2
 
+import { isBotAdmin } from "./bot-access";
+
 export type TgUser = {
   id: number;
   first_name?: string;
@@ -84,10 +86,15 @@ function isDevHost(host: string | null): boolean {
   return allowed.includes(name);
 }
 
+/**
+ * Один и тот же список админов для бота и для веба.
+ *
+ * Раньше здесь читался только `OWNER_TELEGRAM_ID`, а бот — `ADMIN_TELEGRAM_IDS`.
+ * Из-за этого человек, добавленный в админы бота, получал 403 в админских
+ * роутах витрины. Права обязаны считаться в одном месте.
+ */
 export function isOwner(user: TgUser | null): boolean {
-  const ownerId = process.env.OWNER_TELEGRAM_ID;
-  if (!ownerId || !user) return false;
-  return String(user.id) === ownerId;
+  return isBotAdmin(user);
 }
 
 export function userLabel(user: TgUser | null): string {

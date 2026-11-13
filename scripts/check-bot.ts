@@ -6,7 +6,7 @@
  * Вызовы Bot API не выполняются: проверяется то, что определяет поведение —
  * тексты, кнопки, доступ и запись в БД.
  */
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 
@@ -638,6 +638,89 @@ async function main() {
   assert(queueView.text.includes("Ждут отправки"), "экран очереди называет себя по-человечески");
   const emptyQueue = adminScreens.queueScreen([], "confirmed");
   assert(emptyQueue.text.includes("Пусто"), "пустая очередь говорит, что всё разобрано");
+
+  // ── Покупатель: свой набор экранов, без админских данных ──────────────────
+  const clientScreens = await import("../src/lib/bot-screens-client");
+  
+  process.env.ADMIN_TELEGRAM_IDS = "111";
+  assert(access.isBotAdmin({ id: 111 }), "владелец остаётся админом");
+  assert(!access.isBotAdmin({ id: 555, username: "buyer" }), "обычный покупатель админом не считается");
+
+  const clientMenu = clientScreens.clientMenuScreen({ name: "Аня", orders: 2, cartCount: 1, bonus: 45000 });
+  assert(clientMenu.text.includes("Аня"), "покупателя зовут по имени");
+  assert(clientMenu.text.includes("2") && clientMenu.text.includes("450"), "видны свои заказы и бонусы");
+  type FlatButton = { text: string; callback_data?: string; url?: string };
+  const clientButtons = ((clientMenu.keyboard?.inline_keyboard ?? []) as FlatButton[][]).flat();
+  assert(
+    clientButtons.some((b) => b.callback_data === "my:orders") &&
+      clientButtons.some((b) => b.callback_data === "my:cart") &&
+      clientButtons.some((b) => b.callback_data === "my:bonus"),
+    "у покупателя есть кнопки заказов, корзины и бонусов",
+  );
+  assert(
+    !clientButtons.some((b) => (b.callback_data ?? "").startsWith("product") || (b.callback_data ?? "").startsWith("order:")),
+    "в клиентском меню нет админских кнопок",
+  );
+
+  // Клиентские экраны не показывают чужие данные и служебные суммы.
+  const clientEmptyOrders = clientScreens.clientOrdersScreen([]);
+  assert(clientEmptyOrders.text.includes("не заказывали"), "пустая история заказов говорит по-человечески");
+
+    const clientOrderCard = clientScreens.clientOrderCardScreen({
+    id: "ord-abc123",
+    createdAt: "2026-11-07T10:00:00Z",
+    total: 5499000,
+    deliveryStatus: "shipped",
+    trackNumber: "RU999",
+    bonusUsed: 0,
+    bonusEarned: 164970,
+    items: [{ title: "PlayStation 5 Slim", variant: "", price: 5499000, quantity: 1, productId: "p" }],
+  });
+  assert(clientOrderCard.text.includes("54 990"), "в карточке заказа цена в рублях, а не в копейках");
+  assert(clientOrderCard.text.includes("RU999"), "клиент видит трек-номер");
+  assert(clientOrderCard.text.includes("Отправлено") || clientOrderCard.text.includes("отправлен"), "статус назван по-человечески");
+
+  const cartScreen = clientScreens.clientCartScreen({
+    lines: [
+      { productId: "p", title: "iPhone", photoUrl: "", variantId: null, variantLabel: "", basePrice: 100, oldPrice: 0, unitPrice: 100, quantity: 2, lineTotal: 200 },
+    ],
+    total: 200,
+    count: 2,
+    savings: 0,
+  });
+  assert(cartScreen.text.includes("Корзина") && cartScreen.text.includes("2"), "корзина покупателя называет количество");
+
+  const emptyCart = clientScreens.clientCartScreen({ lines: [], total: 0, count: 0, savings: 0 });
+  assert(emptyCart.text.includes("пусто") || emptyCart.text.includes("Пока пусто"), "пустая корзина объясняет, что делать");
+
+  const bonus = clientScreens.clientBonusScreen({ bonus: 45000, events: [{ amount: 135000, reason: "Кешбэк за заказ" }] });
+  assert(bonus.text.includes("Кешбэк"), "история бонусов показывает причину начисления");
+
+  // Разделение в вебхуке: клиентские действия нельзя вызвать админскими
+  // callback-ами, а админские — клиентскими.
+  const routeSource = readFileSync(
+    path.join(process.cwd(), "src/app/api/bot/webhook/route.ts"),
+    "utf8",
+  );
+  assert(routeSource.includes('data.startsWith("my:")'), "в вебхуке есть отдельная ветка клиентских кнопок");
+  assert(
+    routeSource.indexOf('data.startsWith("my:")') < routeSource.indexOf("switch (action)"),
+    "клиентские кнопки разбираются ДО админского switch — админский код до них не доходит",
+  );
+  assert(
+    routeSource.includes("if (!isBotAdmin(from))") && routeSource.includes("handleClientMessage"),
+    "обычный пользователь попадает в клиентский обработчик, а не в тупик «нет доступа»",
+  );
+
+  // Без настроенных админов бот не должен закрываться для покупателей:
+  // магазин ещё не подключил владельца, но клиенты уже могут писать.
+  delete process.env.ADMIN_TELEGRAM_IDS;
+  delete process.env.OWNER_TELEGRAM_ID;
+  delete process.env.ADMIN_TELEGRAM_USERNAMES;
+  assert(!access.adminsConfigured(), "админы не настроены");
+  assert(!access.isBotAdmin({ id: 555 }), "и никто не админ");
+  const stillClient = clientScreens.clientMenuScreen({ name: "Аня", orders: 0, cartCount: 0, bonus: 0 });
+  assert(stillClient.text.includes("Аня"), "клиентское меню собирается и без настроенного владельца");
 
   rmSync(dir, { recursive: true, force: true });
   console.log("[check:bot] PASS — доступ, экраны, товары, варианты, характеристики, бонусы и заказы работают");

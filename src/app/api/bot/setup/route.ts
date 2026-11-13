@@ -15,7 +15,19 @@ export const dynamic = "force-dynamic";
  * Если не задано ни BOT_SETUP_TOKEN, ни админы — настройка закрыта.
  */
 
-const COMMANDS = [
+/**
+ * Два набора команд: покупателю — про его заказы, админу — про магазин.
+ * Telegram показывает владельцу свой список по scope, остальным — дефолтный.
+ */
+const CLIENT_COMMANDS = [
+  { command: "start", description: "Мои заказы и корзина" },
+  { command: "orders", description: "Мои заказы" },
+  { command: "cart", description: "Корзина" },
+  { command: "bonus", description: "Бонусы" },
+  { command: "help", description: "Как мы работаем" },
+];
+
+const ADMIN_COMMANDS = [
   { command: "start", description: "Панель магазина" },
   { command: "new", description: "Добавить товар" },
   { command: "products", description: "Товары: цена, фото, варианты" },
@@ -77,8 +89,22 @@ async function handler(req: NextRequest) {
   const webhookSet = await setWebhook(webhookUrl, secret);
   steps.push({ step: "setWebhook", ok: Boolean(webhookSet), detail: webhookSet ? webhookUrl : takeLastError() });
 
-  const commands = await setMyCommands(COMMANDS);
-  steps.push({ step: "setMyCommands", ok: Boolean(commands), detail: COMMANDS.length });
+  // Дефолтный набор — покупательский: он для большинства людей в боте.
+  const clientCommands = await setMyCommands(CLIENT_COMMANDS);
+  steps.push({ step: "setMyCommands:client", ok: Boolean(clientCommands), detail: CLIENT_COMMANDS.length });
+
+  // Каждому админу — его набор, чтобы меню не сбивало с толку.
+  const adminChats = adminIds()
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  const adminResults = await Promise.all(
+    adminChats.map((chatId) => setMyCommands(ADMIN_COMMANDS, { type: "chat", chat_id: chatId })),
+  );
+  steps.push({
+    step: "setMyCommands:admins",
+    ok: adminResults.every(Boolean),
+    detail: { chats: adminChats.length, applied: adminResults.filter(Boolean).length },
+  });
 
   const info = await getWebhookInfo();
   steps.push({ step: "getWebhookInfo", ok: Boolean(info), detail: info ?? takeLastError() });
