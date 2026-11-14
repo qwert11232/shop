@@ -1,5 +1,5 @@
-import { appButton } from "./bot-screens";
-import { esc, money, type Screen } from "./bot-screens";
+import { appButton, esc, money, type Screen } from "./bot-screens";
+import type { Keyboard, ReplyKeyboard } from "./bot-api";
 import { DELIVERY_STEPS, deliveryLabel, deliveryStepIndex } from "./order-status";
 import type { Cart, OrderSummary } from "./shop";
 
@@ -16,8 +16,58 @@ import type { Cart, OrderSummary } from "./shop";
  */
 
 /** Подвал клиентских экранов: витрина — главный путь к покупке. */
-function shopKeyboard(extra: { text: string; callback_data: string }[][] = []) {
+function shopKeyboard(extra: InlineRow[] = []): Keyboard {
   return { inline_keyboard: [...extra, [appButton()]] };
+}
+
+type InlineRow = { text: string; callback_data: string }[];
+
+/**
+ * Разделы покупателя — нижняя клавиатура, как в привычных ботах.
+ *
+ * Почему не инлайн: панель висит под полем ввода и остаётся на месте, пока
+ * человек листает чат. Инлайн-кнопки уезжают вместе со старым сообщением, и
+ * после двух-трёх действий меню приходится искать вверх.
+ *
+ * Тексты кнопок — это же и есть команды: нажатие приходит обычным сообщением.
+ */
+export const CLIENT_SECTIONS = {
+  shop: "🛍 Витрина",
+  orders: "📦 Мои заказы",
+  cart: "🧺 Корзина",
+  bonus: "🎁 Мои бонусы",
+  help: "❓ Помощь",
+} as const;
+
+/**
+ * Панель приходит ТОЛЬКО в личке. В группе нижняя клавиатура висела бы у всех
+ * участников — покупательские разделы там ни к чему.
+ */
+export function clientReplyKeyboard(): ReplyKeyboard {
+  return {
+    keyboard: [
+      [{ text: CLIENT_SECTIONS.shop }],
+      [{ text: CLIENT_SECTIONS.orders }, { text: CLIENT_SECTIONS.cart }],
+      [{ text: CLIENT_SECTIONS.bonus }, { text: CLIENT_SECTIONS.help }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+  };
+}
+
+/** Совпадает ли текст сообщения с кнопкой раздела. Регистр и emoji не важны. */
+export function clientSectionOf(text: string): keyof typeof CLIENT_SECTIONS | null {
+  const norm = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-zа-яё ]/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const needle = norm(text);
+  for (const [key, label] of Object.entries(CLIENT_SECTIONS)) {
+    if (norm(label) === needle) return key as keyof typeof CLIENT_SECTIONS;
+  }
+  return null;
 }
 
 /** Шаги заказа одной строкой: «Оплачен → Отправлен → Получен». */
@@ -33,29 +83,42 @@ export function clientMenuScreen(input: {
   cartCount: number;
   bonus: number;
 }): Screen {
-  const hello = input.name ? `${esc(input.name)}, ` : "";
+  const hello = input.name ? `${esc(input.name)}, здравствуйте!` : "Здравствуйте!";
   const text = [
-    `<b>${hello}добро пожаловать в ТЕХНОЛАБ</b>`,
+    "<b>ТЕХНОЛАБ · магазин техники</b>",
     "",
-    "Здесь можно посмотреть свои заказы, корзину и бонусы.",
-    "Каталог, сравнение и оформление — в приложении.",
-    "",
-    input.orders > 0
-      ? `Ваших заказов: <b>${input.orders}</b>`
-      : "Заказов пока нет — самое время выбрать что-нибудь.",
-    input.cartCount > 0 ? `В корзине: <b>${input.cartCount}</b> поз.` : "",
-    input.bonus > 0 ? `Бонусов на счету: <b>${money(input.bonus)}</b>` : "",
+    hello,
+    "Здесь ваши заказы, корзина и бонусы. Выбрать и заказать товар можно",
+    "в приложении — оно открывается кнопкой ниже.",
+  ].join("\n");
+
+  // Сводка — отдельными строками под текстом, чтобы цифры были на виду,
+  // а не терялись в абзаце.
+  const summary = [
+    input.orders > 0 ? `📦 Заказов: <b>${input.orders}</b>` : "",
+    input.cartCount > 0 ? `🧺 В корзине: <b>${input.cartCount}</b> поз.` : "",
+    input.bonus > 0 ? `🎁 Бонусов: <b>${money(input.bonus)}</b>` : "",
   ]
     .filter(Boolean)
     .join("\n");
 
-  const rows: { text: string; callback_data: string }[][] = [];
-  if (input.orders > 0) rows.push([{ text: "Мои заказы", callback_data: "my:orders" }]);
-  if (input.cartCount > 0) rows.push([{ text: "Моя корзина", callback_data: "my:cart" }]);
-  rows.push([{ text: "Бонусы", callback_data: "my:bonus" }]);
-  rows.push([{ text: "Как мы работаем", callback_data: "my:help" }]);
+  return {
+    text: summary ? `${text}\n\n${summary}` : text,
+    keyboard: shopKeyboard(),
+  };
+}
 
-  return { text, keyboard: shopKeyboard(rows) };
+/** Экран перехода в витрину: кнопка запуска мини-аппа. */
+export function clientShopScreen(): Screen {
+  return {
+    text: [
+      "<b>Витрина</b>",
+      "",
+      "Каталог, сравнение и оформление заказа — в приложении.",
+      "Оно откроется внутри Telegram: корзина и бонусы подхватятся сами.",
+    ].join("\n"),
+    keyboard: shopKeyboard(),
+  };
 }
 
 export function clientOrdersScreen(orders: OrderSummary[]): Screen {

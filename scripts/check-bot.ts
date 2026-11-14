@@ -660,11 +660,14 @@ async function main() {
   assert(clientMenu.text.includes("2") && clientMenu.text.includes("450"), "видны свои заказы и бонусы");
   type FlatButton = { text: string; callback_data?: string; url?: string };
   const clientButtons = ((clientMenu.keyboard?.inline_keyboard ?? []) as FlatButton[][]).flat();
+  // Разделы переехали в нижнюю панель: в сообщении остаётся кнопка витрины.
+  const clientPanel = clientScreens
+    .clientReplyKeyboard()
+    .keyboard.map((row) => row.map((b) => b.text))
+    .flat();
   assert(
-    clientButtons.some((b) => b.callback_data === "my:orders") &&
-      clientButtons.some((b) => b.callback_data === "my:cart") &&
-      clientButtons.some((b) => b.callback_data === "my:bonus"),
-    "у покупателя есть кнопки заказов, корзины и бонусов",
+    ["Мои заказы", "Корзина", "Мои бонусы"].every((name) => clientPanel.some((label) => label.includes(name))),
+    "у покупателя есть разделы заказов, корзины и бонусов — на панели",
   );
   assert(
     !clientButtons.some((b) => (b.callback_data ?? "").startsWith("product") || (b.callback_data ?? "").startsWith("order:")),
@@ -768,6 +771,40 @@ async function main() {
   assert(
     readFileSync(path.join(process.cwd(), "src/components/shop/ShopApp.tsx"), "utf8").includes('params.get("product")'),
     "витрина открывает товар по ?product= из кнопки бота",
+  );
+
+  // ── Панель разделов у покупателя (нижняя клавиатура) ─────────────────────
+  const panel = clientScreens.clientReplyKeyboard();
+  const panelRows = panel.keyboard.map((row) => row.map((b) => b.text));
+  assert(panel.keyboard.length === 3, "панель разделов — три ряда, как в привычных ботах");
+  assert(
+    panelRows.flat().every((label) => /\p{Extended_Pictographic}/u.test(label)),
+    "у каждой кнопки панели есть значок — так разделы читаются с одного взгляда",
+  );
+  assert(panel.resize_keyboard === true, "панель подстраивается под ширину экрана");
+  assert(panel.is_persistent === true, "панель не сворачивается сама");
+
+  // Нажатие кнопки панели приходит обычным текстом — его надо узнавать.
+  assert(clientScreens.clientSectionOf("📦 Мои заказы") === "orders", "кнопка заказов распознаётся");
+  assert(clientScreens.clientSectionOf("мои заказы") === "orders", "и без эмодзи тоже");
+  assert(clientScreens.clientSectionOf("  🧺 корзина ") === "cart", "пробелы и регистр не мешают");
+  assert(clientScreens.clientSectionOf("привет") === null, "обычный текст разделом не считается");
+
+  // Меню: текст с кнопкой запуска + отдельная установка панели.
+  const routeSrc = readFileSync(path.join(process.cwd(), "src/app/api/bot/webhook/route.ts"), "utf8");
+  assert(routeSrc.includes("showClientMenu"), "меню покупателя ставит панель через отдельную функцию");
+  assert(
+    routeSrc.indexOf("await sendMessage(chatId, screen.text, screen.keyboard);") <
+      routeSrc.indexOf("const panel = clientReplyKeyboard();"),
+    "сначала сообщение с кнопкой витрины, потом панель: иначе reply_markup перезапишется",
+  );
+  assert(
+    routeSrc.includes('chatType !== "private"') || routeSrc.includes('chatType === "private"'),
+    "панель приходит только в личку — в группе она висела бы у всех",
+  );
+  assert(
+    routeSrc.includes("clientSectionOf(text)"),
+    "нажатия кнопок панели разбираются до команд и поиска по заказу",
   );
 
   rmSync(dir, { recursive: true, force: true });
