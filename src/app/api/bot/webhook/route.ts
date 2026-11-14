@@ -57,6 +57,9 @@ import {
   clientMenuScreen,
   clientOrderCardScreen,
   clientOrdersScreen,
+  clientReplyKeyboard,
+  clientSectionOf,
+  clientShopScreen,
 } from "@/lib/bot-screens-client";
 import {
   SETTING_DEFS,
@@ -229,7 +232,7 @@ async function handleMessage(message: BotMessage): Promise<void> {
       await sendMessage(chatId, screen.text, screen.keyboard);
       return;
     }
-    await handleClientMessage(from, chatId, command, text);
+    await handleClientMessage(from, chatId, command, text, message.chat.type);
     return;
   }
 
@@ -290,13 +293,55 @@ async function handleClientMessage(
   chatId: number,
   command: string,
   text: string,
+  chatType = "private",
 ): Promise<void> {
   const me = String(from.id);
+  // Нижнюю панель показываем только в личке: в группе она висела бы у всех.
+  const inPrivate = chatType === "private";
+
+  // Кнопки нижней панели приходят обычным текстом — и это самый частый способ
+  // попасть в раздел. Разбираем его до команд и до поиска по номеру заказа.
+  const section = clientSectionOf(text);
+  if (section) {
+    switch (section) {
+      case "orders":
+        await renderClient(chatId, inPrivate, clientOrdersScreen(await listMyOrders(me)));
+        return;
+      case "cart":
+        await renderClient(chatId, inPrivate, clientCartScreen(await getCart(me)));
+        return;
+      case "bonus": {
+        const customer = await getOrCreateCustomer({
+          tgUserId: me,
+          firstName: from.first_name,
+          username: from.username ?? "",
+        });
+        await renderClient(
+          chatId,
+          inPrivate,
+          clientBonusScreen({ bonus: customer.bonusBalance, events: await listBonusEvents(me, 8) }),
+        );
+        return;
+      }
+      case "help":
+        await renderClient(chatId, inPrivate, await clientHelp());
+        return;
+      case "shop": {
+        // «Витрина» открывает мини-апп: обычная ссылка сделала бы покупателя
+        // гостем. Inline-кнопка `web_app` живёт только в сообщении, поэтому
+        // нижняя панель остаётся, а над ней приходит кнопка запуска.
+        await renderClient(chatId, inPrivate, clientShopScreen());
+        return;
+      }
+      default:
+        break;
+    }
+  }
 
   switch (command) {
     case "/start":
     case "/menu": {
-      await render(chatId, await clientMenu(me, from.first_name));
+      await showClientMenu(chatId, me, from.first_name, inPrivate);
       return;
     }
     case "/orders":
@@ -374,6 +419,39 @@ async function handleClientCallback(
     default:
       await show(await clientMenu(tgUserId, firstName));
   }
+}
+
+/**
+ * Экран покупателя: текст с инлайн-кнопками экрана.
+ *
+ * Нижнюю панель здесь не повторяем — `reply_markup` в Bot API один на
+ * сообщение, и панель перетёрла бы кнопку «Открыть витрину». Панель уже
+ * стоит под полем ввода с момента `/start` и остаётся на месте.
+ */
+async function renderClient(chatId: number, _inPrivate: boolean, screen: Screen): Promise<void> {
+  await sendMessage(chatId, screen.text, screen.keyboard);
+}
+
+/**
+ * Меню с панелью разделов. Порядок важен: сначала сообщение с кнопкой
+ * «Открыть витрину», потом установка нижней панели — иначе Telegram
+ * перезапишет reply_markup и кнопка запуска приложения пропадёт.
+ */
+async function showClientMenu(
+  chatId: number,
+  tgUserId: string,
+  firstName: string,
+  inPrivate: boolean,
+): Promise<void> {
+  const screen = await clientMenu(tgUserId, firstName);
+  await sendMessage(chatId, screen.text, screen.keyboard);
+  if (!inPrivate) return;
+  const panel = clientReplyKeyboard();
+  await sendMessage(
+    chatId,
+    "Разделы — на панели ниже. Витрина открывается кнопкой <b>🛍 Витрина</b>.",
+    panel,
+  );
 }
 
 async function clientMenu(tgUserId: string, firstName: string): Promise<Screen> {

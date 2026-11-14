@@ -18,6 +18,28 @@ export type InlineButton =
   | { text: string; web_app: { url: string } };
 export type Keyboard = { inline_keyboard: InlineButton[][] };
 
+/**
+ * Кнопка нижней клавиатуры. Такие кнопки не редактируют сообщение: нажатие
+ * приходит как обычный текст. Покупателю это и нужно — панель разделов висит
+ * под полем ввода и не даёт меню уехать вверх по чату.
+ */
+export type ReplyButton = { text: string };
+
+/** Нижняя клавиатура: `reply_markup.keyboard`. */
+export type ReplyKeyboard = {
+  keyboard: ReplyButton[][];
+  resize_keyboard?: boolean;
+  is_persistent?: boolean;
+};
+
+/** Любая клавиатура, которую умеет отправлять Bot API. */
+export type ReplyMarkup = Keyboard | ReplyKeyboard;
+
+/** `reply_markup.keyboard` — нижняя панель, остальное — inline-кнопки. */
+export function isReplyKeyboard(markup: ReplyMarkup): markup is ReplyKeyboard {
+  return Array.isArray((markup as ReplyKeyboard).keyboard);
+}
+
 export type BotUser = {
   id: number;
   is_bot?: boolean;
@@ -111,7 +133,20 @@ export async function callBot<T>(
   }
 }
 
-export function sendMessage(chatId: number | string, text: string, keyboard?: Keyboard) {
+/**
+ * `keyboard` — инлайн-кнопки (или нижняя панель, если передать её).
+ * `replyKeyboard` — нижняя панель отдельным полем: `editMessageText` её не
+ * умеет, поэтому при возврате в меню её надо отправить новым сообщением.
+ */
+/**
+ * Одно сообщение — одна клавиатура: `reply_markup` в Bot API один.
+ *
+ * Нижняя панель при этом не «сгорает»: она живёт под полем ввода, пока её не
+ * заменят. Поэтому панель ставится экраном меню, а дальше сообщения идут со
+ * своими инлайн-кнопками — как в привычных ботах, где сверху текст с кнопкой,
+ * а снизу постоянные разделы.
+ */
+export function sendMessage(chatId: number | string, text: string, keyboard?: ReplyMarkup) {
   return callBot("sendMessage", {
     chat_id: chatId,
     text,
